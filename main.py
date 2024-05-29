@@ -11,7 +11,7 @@ app.config ['SECRET_KEY'] = os.urandom(64)
 client_id = '9aea088859ff4cd184e19e577c24da52'
 client_secret = 'a7d5c277a48b4ce2906ce0d6292a3d6c'
 redirect_uri = 'http://localhost:5000/callback'
-scope = 'playlist-read-private'
+scope = 'playlist-read-private playlist-modify-public playlist-modify-private'
 
 cache_handler = FlaskSessionCacheHandler(session)
 sp_oauth = SpotifyOAuth(
@@ -97,9 +97,38 @@ def display_playlist_titles():
         track_titles_html = '<br>'.join(sorted_track_titles)
 
         return f'''
-            <h2>Titles of the selected playlist (sorted alphabetically):</h2>
+            <h2>Titles of the selected playlist (sorted by length):</h2>
             {track_titles_html}
+            <form method="post" action="/create_playlist">
+                <input type="hidden" name="track_titles" value="{';'.join(sorted_track_titles)}">
+                <input type="submit" value="Create Playlist with Sorted Titles">
+            </form>
         '''
+
+@app.route('/create_playlist', methods=['POST'])
+def create_playlist():
+    track_titles = request.form.get('track_titles').split(';')
+
+    track_ids = []
+    for title in track_titles:
+        results = sp.search(q=f'track:{title}', type='track', limit=1)
+        items = results['tracks']['items']
+
+        if items:
+            track_ids.append(items[0]['id'])
+        else:
+            print(f"No track found for title: {title}")
+
+    user_id = sp.current_user()['id']
+    new_playlist = sp.user_playlist_create(user_id, 'Sorted Playlist')
+
+    chunk_size = 100
+    for i in range(0, len(track_ids), chunk_size):
+        chunk = track_ids[i:i + chunk_size]
+
+        sp.playlist_add_items(new_playlist['id'], chunk)
+
+    return 'New playlist created with sorted track titles'
 
 
 @app.route('/logout')
