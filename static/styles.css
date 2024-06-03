@@ -1,0 +1,86 @@
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f4f4f4;
+    margin: 0;
+    padding: 0;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #1db954;
+    padding: 10px 20px;
+    color: white;
+}
+
+.title h1 {
+    margin: 0;
+}
+
+.profile {
+    /* Profile styles */
+}
+
+.container {
+    display: flex;
+    padding: 20px;
+}
+
+.sidebar {
+    flex: 1;
+    margin-right: 20px;
+}
+
+.content {
+    flex: 3;
+    background-color: #fff;
+    padding: 20px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+}
+
+label, select {
+    display: block;
+    width: 100%;
+    margin-bottom: 10px;
+}
+
+button {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    background-color: #1db954;
+    color: white;
+    border: none;
+    cursor: pointer;
+    margin-bottom: 10px;
+}
+
+button:hover {
+    background-color: #1ed760;
+}
+
+#track-titles {
+    margin-top: 20px;
+}
+
+.floating-bubble {
+    position: fixed;
+    top: 80px;
+    right: 20px;
+    background-color: #1db954;
+    color: white;
+    padding: 10px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.floating-bubble button {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+}

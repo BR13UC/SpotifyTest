@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sortify</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="header">
+        <div class="title">
+            <h1>Sortify</h1>
+        </div>
+        <div class="profile">
+            <!-- Profile information will be dynamically inserted here -->
+        </div>
+    </div>
+    <div class="container">
+        <div class="sidebar">
+            <label for="sort-options">Liste des tris:</label>
+            <select id="sort-options" name="sort-options">
+                <!-- Sorting options -->
+            </select>
+
+            <label for="playlist-select">Liste des playlists:</label>
+            <select id="playlist-select" name="playlist">
+                <!-- Playlist options -->
+            </select>
+
+            <button id="start-sort-btn">Lancer le tri</button>
+        </div>
+        <div class="content">
+            <div id="track-titles"></div>
+        </div>
+    </div>
+    <div class="floating-bubble">
+        <button id="create-playlist-btn" style="display: none;">Créer une Playlist</button>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

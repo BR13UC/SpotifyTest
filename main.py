@@ -1,12 +1,12 @@
 import os
-from flask import Flask, request, redirect, session, url_for
+from flask import Flask, request, redirect, session, url_for, render_template, jsonify
 
 from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.cache_handler import FlaskSessionCacheHandler
 
 app = Flask(__name__)
-app.config ['SECRET_KEY'] = os.urandom(64)
+app.config['SECRET_KEY'] = os.urandom(64)
 
 client_id = '9aea088859ff4cd184e19e577c24da52'
 client_secret = 'a7d5c277a48b4ce2906ce0d6292a3d6c'
@@ -30,84 +30,79 @@ def home():
     if not sp_oauth.validate_token(cache_handler.get_cached_token()):
         auth_url = sp_oauth.get_authorize_url()
         return redirect(auth_url)
-    return redirect(url_for('choose_action'))
+    return render_template('index.html')
 
 @app.route('/callback')
 def callback():
     sp_oauth.get_access_token(request.args['code'])
-    return redirect(url_for('choose_action'))
+    return redirect(url_for('home'))
 
-@app.route('/choose_action', methods=['GET', 'POST'])
-def choose_action():
+@app.route('/get_playlists', methods=['GET'])
+def get_playlists():
     if not sp_oauth.validate_token(cache_handler.get_cached_token()):
-        auth_url = sp_oauth.get_authorize_url()
-        return redirect(auth_url)
+        return jsonify({'error': 'Not authenticated'}), 401
 
-    if request.method == 'POST':
-        action = request.form.get('action')
-        if action == 'display_all':
-            return redirect(url_for('display_all_playlists'))
-        elif action == 'display_titles':
-            return redirect(url_for('display_playlist_titles'))
-
-    return '''
-        <form method="post">
-            <input type="submit" name="action" value="display_all">
-            <input type="submit" name="action" value="display_titles">
-        </form>
-    '''
-
-@app.route('/display_all_playlists')
-def display_all_playlists():
     playlists = sp.current_user_playlists()
-    playlists_infos = [(pl['name'], pl['external_urls']['spotify']) for pl in playlists['items']]
-    playlists_html = '<br>'.join([f'{name}: {url}' for name, url in playlists_infos])
-    return playlists_html
+    playlist_options = [{'id': pl['id'], 'name': pl['name']} for pl in playlists['items']]
+    return jsonify(playlists=playlist_options)
 
-@app.route('/display_playlist_titles', methods=['GET', 'POST'])
-def display_playlist_titles():
-    if request.method == 'GET':
-        playlists = sp.current_user_playlists()
-        playlist_options = [(pl['id'], pl['name']) for pl in playlists['items']]
+@app.route('/get_playlist_tracks', methods=['POST'])
+def get_playlist_tracks():
+    if not sp_oauth.validate_token(cache_handler.get_cached_token()):
+        return jsonify({'error': 'Not authenticated'}), 401
 
-        playlist_options_html = ''.join([f'<option value="{playlist[0]}">{playlist[1]}</option>' for playlist in playlist_options])
+    data = request.json
+    playlist_id = data['playlist_id']
+    sort_option = data.get('sort_option', 'length_asc')
+    
+    offset = 0
+    track_titles = []
 
-        return f'''
-            <form method="post">
-                <label for="playlist">Choose a playlist:</label>
-                <select name="playlist" id="playlist">
-                    {playlist_options_html}
-                </select>
-                <input type="submit" value="Display Titles">
-            </form>
-        '''
-    elif request.method == 'POST':
-        playlist_id = request.form.get('playlist')
-        offset = 0
-        track_titles = []
+    while True:
+        tracks = sp.playlist_tracks(playlist_id, offset=offset)
+        track_titles.extend([track['track']['name'] for track in tracks['items']])
+        if not tracks['next']:
+            break
+        offset += len(tracks['items'])
 
-        while True:
-            tracks = sp.playlist_tracks(playlist_id, offset=offset)
-            track_titles.extend([track['track']['name'] for track in tracks['items']])
-            if not tracks['next']:
-                break
-            offset += len(tracks['items'])
-
+    if sort_option == 'length_asc':
         sorted_track_titles = sorted(track_titles, key=len)
-        track_titles_html = '<br>'.join(sorted_track_titles)
+    elif sort_option == 'length_desc':
+        sorted_track_titles = sorted(track_titles, key=len, reverse=True)
+    elif sort_option == 'name_asc':
+        sorted_track_titles = sorted(track_titles)
+    elif sort_option == 'name_desc':
+        sorted_track_titles = sorted(track_titles, reverse=True)
+    else:
+        sorted_track_titles = track_titles
 
-        return f'''
-            <h2>Titles of the selected playlist (sorted by length):</h2>
-            {track_titles_html}
-            <form method="post" action="/create_playlist">
-                <input type="hidden" name="track_titles" value="{';'.join(sorted_track_titles)}">
-                <input type="submit" value="Create Playlist with Sorted Titles">
-            </form>
-        '''
+    return jsonify({'sorted_titles': sorted_track_titles})
 
-@app.route('/create_playlist', methods=['POST'])
-def create_playlist():
-    track_titles = request.form.get('track_titles').split(';')
+
+@app.route('/get_profile', methods=['GET'])
+def get_profile():
+    if not sp_oauth.validate_token(cache_handler.get_cached_token()):
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    user_profile = sp.current_user()
+    return jsonify(user_profile)
+
+@app.route('/get_sort_options', methods=['GET'])
+def get_sort_options():
+    sort_options = [
+        {'id': 'name_asc', 'name': 'Name Ascending'},
+        {'id': 'name_desc', 'name': 'Name Descending'},
+        {'id': 'length_asc', 'name': 'Length Ascending'},
+        {'id': 'length_desc', 'name': 'Length Descending'},
+    ]
+    return jsonify(sort_options)
+
+@app.route('/create_sorted_playlist', methods=['POST'])
+def create_sorted_playlist():
+    if not sp_oauth.validate_token(cache_handler.get_cached_token()):
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    track_titles = request.json.get('track_titles', [])
 
     track_ids = []
     for title in track_titles:
@@ -119,17 +114,18 @@ def create_playlist():
         else:
             print(f"No track found for title: {title}")
 
+    if not track_ids:
+        return 'No tracks found for the provided titles.', 400
+
     user_id = sp.current_user()['id']
     new_playlist = sp.user_playlist_create(user_id, 'Sorted Playlist')
 
     chunk_size = 100
     for i in range(0, len(track_ids), chunk_size):
         chunk = track_ids[i:i + chunk_size]
-
         sp.playlist_add_items(new_playlist['id'], chunk)
 
     return 'New playlist created with sorted track titles'
-
 
 @app.route('/logout')
 def logout():
