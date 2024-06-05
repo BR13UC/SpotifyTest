@@ -123,6 +123,10 @@ def create_sorted_playlist():
 
     return 'New playlist created with sorted track titles'
 
+@app.route('/settings')
+def settings():
+    return render_template('settings.html')
+
 
 @app.route('/logout')
 def logout():

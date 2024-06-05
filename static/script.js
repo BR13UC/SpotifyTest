@@ -7,16 +7,35 @@ document.addEventListener('DOMContentLoaded', function () {
     const startSortBtn = document.getElementById('start-sort-btn');
     const spinner = document.getElementById('spinner');
     const playlistNameInput = document.getElementById('playlist-name');
+    const settingsBtn = document.getElementById('settings-btn');
+    const changeThemeBtn = document.getElementById('change-theme-btn');
+    const greenThemeBtn = document.getElementById('green-theme-btn');
+    const purpleThemeBtn = document.getElementById('purple-theme-btn');
+
 
     fetch('/get_profile')
-        .then(response => response.json())
-        .then(data => {
-            const profileDiv = document.querySelector('.profile');
-            profileDiv.innerHTML = `
-                <img src="${data.images[0].url}" alt="Profile Image" style="width: 50px; height: 50px; border-radius: 50%;">
-                <span>${data.display_name}</span>
-            `;
-        });
+    .then(response => response.json())
+    .then(data => {
+        const profileDiv = document.querySelector('.profile');
+        profileDiv.innerHTML = `
+        <img src="${data.images[0].url}" alt="Profile Image" style="width: 50px; height: 50px; border-radius: 50%;">
+        <span>${data.display_name}</span>
+        `;
+    });
+
+    settingsBtn.addEventListener('click', function () {
+        window.location.href = '/settings';
+    });
+
+    greenThemeBtn.addEventListener('click', function() {
+        document.documentElement.style.setProperty('--primary-color', '#1db954');
+        document.documentElement.style.setProperty('--secondary-color', '#551E99');
+    });
+
+    purpleThemeBtn.addEventListener('click', function() {
+        document.documentElement.style.setProperty('--primary-color', '#551E99');
+        document.documentElement.style.setProperty('--secondary-color', '#1db954');
+    });
 
     fetch('/get_playlists')
         .then(response => response.json())

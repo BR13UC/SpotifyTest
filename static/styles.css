@@ -1,3 +1,8 @@
+:root {
+    --primary-color: #1db954;
+    --secondary-color: #551E99;
+}
+
 body {
     font-family: Arial, sans-serif;
     background-color: #f4f4f4;
@@ -9,7 +14,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: #1db954;
+    background-color: var(--primary-color);
     padding: 10px 20px;
     color: white;
 }
@@ -48,15 +53,31 @@ button {
     display: block;
     width: 100%;
     padding: 10px;
-    background-color: #1db954;
+    background-color: var(--primary-color);
     color: white;
     border: none;
     cursor: pointer;
     margin-bottom: 10px;
 }
 
+#green-theme-btn {
+    background-color: #1db954;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    cursor: pointer;
+}
+
+#purple-theme-btn {
+    background-color: #551E99;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    cursor: pointer;
+}
+
 button:hover {
-    background-color: #1ed760;
+    background-color: var(--secondary-color);
 }
 
 #track-titles {
@@ -67,7 +88,7 @@ button:hover {
     position: fixed;
     top: 80px;
     right: 20px;
-    background-color: #1db954;
+    background-color: var(--primary-color);
     color: white;
     padding: 10px;
     border-radius: 50%;
