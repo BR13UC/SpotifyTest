@@ -54,7 +54,7 @@ def get_playlist_tracks():
     data = request.json
     playlist_id = data['playlist_id']
     sort_option = data.get('sort_option', 'length_asc')
-    
+
     offset = 0
     track_titles = []
 
@@ -99,10 +99,9 @@ def get_sort_options():
 
 @app.route('/create_sorted_playlist', methods=['POST'])
 def create_sorted_playlist():
-    if not sp_oauth.validate_token(cache_handler.get_cached_token()):
-        return jsonify({'error': 'Not authenticated'}), 401
-
-    track_titles = request.json.get('track_titles', [])
+    data = request.json
+    track_titles = data.get('track_titles', [])
+    playlist_name = data.get('playlist_name', 'Sorted Playlist')
 
     track_ids = []
     for title in track_titles:
@@ -114,11 +113,8 @@ def create_sorted_playlist():
         else:
             print(f"No track found for title: {title}")
 
-    if not track_ids:
-        return 'No tracks found for the provided titles.', 400
-
     user_id = sp.current_user()['id']
-    new_playlist = sp.user_playlist_create(user_id, 'Sorted Playlist')
+    new_playlist = sp.user_playlist_create(user_id, playlist_name)
 
     chunk_size = 100
     for i in range(0, len(track_ids), chunk_size):
@@ -126,6 +122,7 @@ def create_sorted_playlist():
         sp.playlist_add_items(new_playlist['id'], chunk)
 
     return 'New playlist created with sorted track titles'
+
 
 @app.route('/logout')
 def logout():

@@ -5,8 +5,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const trackTitlesDiv = document.getElementById('track-titles');
     const createPlaylistBtn = document.getElementById('create-playlist-btn');
     const startSortBtn = document.getElementById('start-sort-btn');
+    const spinner = document.getElementById('spinner');
+    const playlistNameInput = document.getElementById('playlist-name');
 
-    // Fetch user profile and update the profile section
     fetch('/get_profile')
         .then(response => response.json())
         .then(data => {
@@ -17,7 +18,6 @@ document.addEventListener('DOMContentLoaded', function () {
             `;
         });
 
-    // Fetch playlists and populate the playlist dropdown
     fetch('/get_playlists')
         .then(response => response.json())
         .then(data => {
@@ -29,7 +29,6 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         });
 
-    // Fetch sorting options and populate the sorting dropdown
     fetch('/get_sort_options')
         .then(response => response.json())
         .then(data => {
@@ -41,11 +40,13 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         });
 
-    // Fetch and display tracks when the sort button is clicked
     startSortBtn.addEventListener('click', function (e) {
         e.preventDefault();
         const playlistId = playlistSelect.value;
         const sortOption = sortOptions.value;
+
+        spinner.style.display = 'block';
+        trackTitlesDiv.innerHTML = '';
 
         fetch('/get_playlist_tracks', {
             method: 'POST',
@@ -59,19 +60,23 @@ document.addEventListener('DOMContentLoaded', function () {
             const sortedTitles = data.sorted_titles;
             trackTitlesDiv.innerHTML = sortedTitles.map(title => `<div>${title}</div>`).join('');
             createPlaylistBtn.style.display = 'block';
+            playlistNameInput.style.display = 'block';
+        })
+        .finally(() => {
+            spinner.style.display = 'none';
         });
     });
 
-    // Create a new playlist with sorted tracks
     createPlaylistBtn.addEventListener('click', function () {
         const sortedTitles = trackTitlesDiv.innerText.split('\n');
+        const playlistName = playlistNameInput.value || 'Sorted Playlist';
 
         fetch('/create_sorted_playlist', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ track_titles: sortedTitles })
+            body: JSON.stringify({ track_titles: sortedTitles, playlist_name: playlistName })
         })
         .then(response => response.text())
         .then(data => {

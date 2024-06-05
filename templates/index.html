@@ -12,28 +12,27 @@
             <h1>Sortify</h1>
         </div>
         <div class="profile">
-            <!-- Profile information will be dynamically inserted here -->
         </div>
     </div>
     <div class="container">
+
         <div class="sidebar">
             <label for="sort-options">Liste des tris:</label>
             <select id="sort-options" name="sort-options">
-                <!-- Sorting options -->
             </select>
-
             <label for="playlist-select">Liste des playlists:</label>
             <select id="playlist-select" name="playlist">
-                <!-- Playlist options -->
             </select>
-
             <button id="start-sort-btn">Lancer le tri</button>
+                <div id="spinner" class="spinner" style="display: none;"></div>
         </div>
         <div class="content">
             <div id="track-titles"></div>
         </div>
     </div>
+
     <div class="floating-bubble">
+        <input type="text" id="playlist-name" placeholder="Nom de la nouvelle playlist" style="display: none;">
         <button id="create-playlist-btn" style="display: none;">Créer une Playlist</button>
     </div>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
