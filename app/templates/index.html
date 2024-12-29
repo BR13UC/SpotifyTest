@@ -3,33 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Statify</title>
+    <title>Statify - Home</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
-<body>
-    <div class="header">
+<body id="home">
+    <header class="header">
         <div class="title">
             <h1>Statify</h1>
         </div>
-        <div class="profile">
+        <div class="profile" id="profile">
         </div>
-    </div>
-    <div class="container">
-
-        <div class="sidebar">
-            <label for="sort-options">Liste des tris:</label>
-            <select id="sort-options" name="sort-options">
-            </select>
-            <label for="playlist-select">Liste des playlists:</label>
-            <select id="playlist-select" name="playlist">
-            </select>
-            <button id="start-sort-btn">Lancer le tri</button>
-                <div id="spinner" class="spinner" style="display: none;"></div>
-        </div>
-        <div class="content">
-            <div id="track-titles"></div>
-        </div>
-    </div>
+    </header>
+    <main class="container">
+        <!-- <section class="login-section">
+            <button id="login-btn" class="login-btn">Log in with Spotify</button>
+        </section> -->
+        <section class="navigation-section">
+            <h2>Explore Statify Features</h2>
+            <div class="nav-buttons">
+                <a href="/sort" class="nav-btn">Sort Playlists</a>
+                <a href="/graphs" class="nav-btn">Analyze Graphs</a>
+            </div>
+        </section>
+    </main>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

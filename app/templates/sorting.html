@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Statify</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body id="sorting">
+    <div class="header">
+        <div class="title">
+            <h1>Statify</h1>
+        </div>
+        <div class="profile">
+        </div>
+    </div>
+    <div class="container">
+        <div class="sidebar">
+            <div>
+                <button onclick="window.location.href='/graphs';" class="nav-btn">Graphs</button>
+            </div>
+            <label for="sort-options">Liste des tris:</label>
+            <select id="sort-options" name="sort-options">
+            </select>
+            <label for="playlist-select">Liste des playlists:</label>
+            <select id="playlist-select" name="playlist">
+            </select>
+            <button id="start-sort-btn">Lancer le tri</button>
+            <div id="spinner" class="spinner" style="display: none;"></div>
+        </div>
+        <div class="content">
+            <div id="track-titles"></div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

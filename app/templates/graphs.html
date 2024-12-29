@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Statify</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body id="graphs">
+    <div class="header">
+        <div class="title">
+            <h1>Statify</h1>
+        </div>
+        <div class="profile">
+        </div>
+    </div>
+    <div class="container">
+        <div class="sidebar">
+            <div>
+                <button onclick="window.location.href='/sort';" class="nav-btn">Aller sur les Tris</button>
+            </div>
+            <label for="graph-options">Liste des graphs:</label>
+            <select id="graph-options" name="graph-options"></select>
+            <button id="create-graph-btn">Dessiner le graph</button>
+            <div id="spinner" class="spinner" style="display: none;"></div>
+            <div>
+                <button id="export-graphml">Exporter en GraphML</button>
+            </div>
+        </div>
+        <div class="content">
+            <div id="graph-container" style="height: 600px;"></div>
+        </div>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

@@ -4,6 +4,8 @@ from spotipy import Spotify
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.cache_handler import FlaskSessionCacheHandler
 from dotenv import load_dotenv
+import networkx as nx
+from db_connection import get_collection
 
 load_dotenv()
 
@@ -32,3 +34,26 @@ def is_valid_token():
             return False
 
     return True
+
+import networkx as nx
+
+def export_artist_genre_graphml(output_file="static/artist_genre.graphml"):
+    G = nx.Graph()
+    collection = get_collection("followed_artists")
+    followed_artists_data = collection.find_one()
+
+    if not followed_artists_data:
+        print("No followed artists data.")
+        return
+
+    artists = followed_artists_data.get("artists", [])
+    for artist in artists:
+        artist_name = artist.get("name", "Unknown Artist")
+        genres = artist.get("genres", [])
+        for genre in genres:
+            G.add_node(artist_name, type="artist")
+            G.add_node(genre, type="genre")
+            G.add_edge(artist_name, genre)
+
+    nx.write_graphml(G, output_file)
+    print(f"Exported artist-genre data to {output_file}")

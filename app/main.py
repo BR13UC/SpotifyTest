@@ -1,12 +1,9 @@
 import datetime
 import os
 from flask import Flask, request, redirect, session, url_for, render_template, jsonify
-from spotipy import Spotify
-from spotipy.oauth2 import SpotifyOAuth
-from spotipy.cache_handler import FlaskSessionCacheHandler
 
 from db_connection import get_collection, set_collection, is_timestamp_stale
-from heplpers import is_valid_token, sp, sp_oauth
+from helpers import is_valid_token, sp, sp_oauth, export_artist_genre_graphml
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(64)
@@ -17,6 +14,14 @@ def home():
         auth_url = sp_oauth.get_authorize_url()
         return redirect(auth_url)
     return render_template('index.html')
+
+@app.route('/sort')
+def sort_page():
+    return render_template('sorting.html')
+
+@app.route('/graphs')
+def graphs_page():
+    return render_template('graphs.html')
 
 @app.route('/callback')
 def callback():
@@ -202,6 +207,51 @@ def get_sort_options():
     except Exception as e:
         print(f"Error in get_sort_options: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/get_graph_options', methods=['GET'])
+def get_graph_options():
+    try:
+        graph_options = [
+            {'id': '0', 'name': 'Liked Artists'},
+            {'id': '1', 'name': 'Playlist by Genre'},
+            {'id': '2', 'name': 'Playlist by Artist'},
+            {'id': '3', 'name': 'Artists Comparator'}
+        ]
+        return jsonify(graph_options)
+    except Exception as e:
+        print(f"Error in get_graph_options: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/export_graph/<format>', methods=['GET'])
+def export_graph(format):
+    try:
+        if format == "graphml":
+            export_artist_genre_graphml()
+            return jsonify({'file_url': '/static/artist_genre.graphml'})
+        else:
+            return jsonify({'error': 'Unsupported format'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/get_artist_genre_graph_data', methods=['GET'])
+def get_artist_genre_graph_data():
+    collection = get_collection("followed_artists")
+    followed_artists_data = collection.find_one()
+
+    if not followed_artists_data:
+        return jsonify({'error': 'No data found'}), 404
+
+    nodes, edges = [], []
+    artists = followed_artists_data.get("artists", [])
+
+    for artist in artists:
+        artist_name = artist.get("name", "Unknown Artist")
+        nodes.append({'id': artist_name, 'label': artist_name, 'group': 'artist'})
+        for genre in artist.get("genres", []):
+            nodes.append({'id': genre, 'label': genre, 'group': 'genre'})
+            edges.append({'from': artist_name, 'to': genre})
+
+    return jsonify({'nodes': nodes, 'edges': edges})
 
 @app.route('/sort_playlist_tracks', methods=['POST'])
 def sort_playlist_tracks():
