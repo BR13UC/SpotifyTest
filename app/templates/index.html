@@ -3,18 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sortify</title>
+    <title>Statify</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
     <div class="header">
         <div class="title">
-            <h1>Sortify</h1>
+            <h1>Statify</h1>
         </div>
         <div class="profile">
-        </div>
-        <div class="settings">
-            <button id="settings-btn">Settings</button>
         </div>
     </div>
     <div class="container">
@@ -32,11 +29,6 @@
         <div class="content">
             <div id="track-titles"></div>
         </div>
-    </div>
-
-    <div class="floating-bubble">
-        <input type="text" id="playlist-name" placeholder="Nom de la nouvelle playlist" style="display: none;">
-        <button id="create-playlist-btn" style="display: none;">Créer une Playlist</button>
     </div>
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>

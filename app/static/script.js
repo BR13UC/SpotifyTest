@@ -7,11 +7,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const startSortBtn = document.getElementById('start-sort-btn');
     const spinner = document.getElementById('spinner');
     const playlistNameInput = document.getElementById('playlist-name');
-    const settingsBtn = document.getElementById('settings-btn');
-    const changeThemeBtn = document.getElementById('change-theme-btn');
-    const greenThemeBtn = document.getElementById('green-theme-btn');
-    const purpleThemeBtn = document.getElementById('purple-theme-btn');
-
 
     fetch('/get_profile')
     .then(response => response.json())
@@ -21,20 +16,6 @@ document.addEventListener('DOMContentLoaded', function () {
         <img src="${data.images[0].url}" alt="Profile Image" style="width: 50px; height: 50px; border-radius: 50%;">
         <span>${data.display_name}</span>
         `;
-    });
-
-    settingsBtn.addEventListener('click', function () {
-        window.location.href = '/settings';
-    });
-
-    greenThemeBtn.addEventListener('click', function() {
-        document.documentElement.style.setProperty('--primary-color', '#1db954');
-        document.documentElement.style.setProperty('--secondary-color', '#551E99');
-    });
-
-    purpleThemeBtn.addEventListener('click', function() {
-        document.documentElement.style.setProperty('--primary-color', '#551E99');
-        document.documentElement.style.setProperty('--secondary-color', '#1db954');
     });
 
     fetch('/get_playlists')
@@ -55,6 +36,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 const optionElement = document.createElement('option');
                 optionElement.value = option.id;
                 optionElement.textContent = option.name;
+                optionElement.setAttribute('data-field', option.field);
                 sortOptions.appendChild(optionElement);
             });
         });
@@ -67,7 +49,7 @@ document.addEventListener('DOMContentLoaded', function () {
         spinner.style.display = 'block';
         trackTitlesDiv.innerHTML = '';
 
-        fetch('/get_playlist_tracks', {
+        fetch('/sort_playlist_tracks', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -76,8 +58,17 @@ document.addEventListener('DOMContentLoaded', function () {
         })
         .then(response => response.json())
         .then(data => {
-            const sortedTitles = data.sorted_titles;
-            trackTitlesDiv.innerHTML = sortedTitles.map(title => `<div>${title}</div>`).join('');
+            if (data.error) {
+                console.error(data.error);
+                trackTitlesDiv.innerHTML = `<div class="error">${data.error}</div>`;
+                return;
+            }
+
+            const tracks = data.tracks;
+
+            trackTitlesDiv.innerHTML = tracks
+                .map(track => `<div>${track.track.name}</div>`)
+                .join('');
             createPlaylistBtn.style.display = 'block';
             playlistNameInput.style.display = 'block';
         })
@@ -86,20 +77,20 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    createPlaylistBtn.addEventListener('click', function () {
-        const sortedTitles = trackTitlesDiv.innerText.split('\n');
-        const playlistName = playlistNameInput.value || 'Sorted Playlist';
+    // createPlaylistBtn.addEventListener('click', function () {
+    //     const sortedTitles = trackTitlesDiv.innerText.split('\n');
+    //     const playlistName = playlistNameInput.value || 'Sorted Playlist';
 
-        fetch('/create_sorted_playlist', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ track_titles: sortedTitles, playlist_name: playlistName })
-        })
-        .then(response => response.text())
-        .then(data => {
-            alert(data);
-        });
-    });
+    //     fetch('/create_sorted_playlist', {
+    //         method: 'POST',
+    //         headers: {
+    //             'Content-Type': 'application/json'
+    //         },
+    //         body: JSON.stringify({ track_titles: sortedTitles, playlist_name: playlistName })
+    //     })
+    //     .then(response => response.text())
+    //     .then(data => {
+    //         alert(data);
+    //     });
+    // });
 });
