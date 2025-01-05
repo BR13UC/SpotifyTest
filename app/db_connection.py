@@ -1,4 +1,5 @@
 from pymongo import MongoClient
+from datetime import datetime, timedelta
 
 CONNECTION_STRING = "mongodb://localhost:27017"
 client = MongoClient(CONNECTION_STRING)
@@ -24,15 +25,16 @@ def set_collection(collection_name, data):
     except Exception as e:
         print(f"Error setting collection: {e}")
 
-from datetime import datetime, timedelta
-
 def is_timestamp_stale(last_updated, max_age_days=1):
     current_time = datetime.utcnow()
     if not last_updated:
         return True
 
     try:
-        last_updated_time = datetime.strptime(last_updated, "%Y-%m-%dT%H:%M:%S.%f")
+        if isinstance(last_updated, datetime):
+            last_updated_time = last_updated
+        else:
+            last_updated_time = datetime.strptime(last_updated, "%Y-%m-%dT%H:%M:%S.%f")
     except ValueError:
         print("Invalid timestamp format, treating as stale.")
         return True

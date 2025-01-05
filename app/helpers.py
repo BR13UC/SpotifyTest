@@ -5,7 +5,8 @@ from spotipy.oauth2 import SpotifyOAuth
 from spotipy.cache_handler import FlaskSessionCacheHandler
 from dotenv import load_dotenv
 import networkx as nx
-from db_connection import get_collection
+from app.db_connection import get_collection
+import networkx as nx
 
 load_dotenv()
 
@@ -13,7 +14,7 @@ sp_oauth = SpotifyOAuth(
     client_id=os.getenv("SPOTIPY_CLIENT_ID"),
     client_secret=os.getenv("SPOTIPY_CLIENT_SECRET"),
     redirect_uri=os.getenv("SPOTIPY_REDIRECT_URI"),
-    scope='playlist-read-private playlist-modify-public playlist-modify-private',
+    scope='user-follow-read playlist-read-private playlist-modify-public playlist-modify-private',
     cache_handler=FlaskSessionCacheHandler(session),
     show_dialog=True
 )
@@ -35,8 +36,6 @@ def is_valid_token():
 
     return True
 
-import networkx as nx
-
 def export_artist_genre_graphml(output_file="static/artist_genre.graphml"):
     G = nx.Graph()
     collection = get_collection("followed_artists")
@@ -57,3 +56,26 @@ def export_artist_genre_graphml(output_file="static/artist_genre.graphml"):
 
     nx.write_graphml(G, output_file)
     print(f"Exported artist-genre data to {output_file}")
+
+def get_genre_color_map():
+    genre_colors = {
+        'pop': '#ff0000',
+        'rock': '#00ff00',
+        'jazz': '#0000ff',
+        'hip hop': '#ff00ff',
+        'classical': '#ffff00',
+        'country': '#00ffff',
+    }
+    return genre_colors
+
+def get_artist_color(genres, genre_colors):
+    if len(genres) == 1:
+        return genre_colors.get(genres[0], '#cccccc')
+    r, g, b = 0, 0, 0
+    for genre in genres:
+        color = genre_colors.get(genre, '#cccccc')
+        r += int(color[1:3], 16)
+        g += int(color[3:5], 16)
+        b += int(color[5:7], 16)
+    r, g, b = r // len(genres), g // len(genres), b // len(genres)
+    return f'#{r:02x}{g:02x}{b:02x}'

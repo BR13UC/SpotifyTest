@@ -17,11 +17,11 @@
     <div class="container">
         <div class="sidebar">
             <div>
-                <button onclick="window.location.href='/sort';" class="nav-btn">Aller sur les Tris</button>
+                <button onclick="window.location.href='/sorts';" class="nav-btn">Aller sur les Tris</button>
             </div>
-            <label for="graph-options">Liste des graphs:</label>
-            <select id="graph-options" name="graph-options"></select>
-            <button id="create-graph-btn">Dessiner le graph</button>
+                <label for="graph-options">Liste des graphs:</label>
+                <select id="graph-options" name="graph-options"></select>
+                <button id="create-graph-btn">Dessiner le graph</button>
             <div id="spinner" class="spinner" style="display: none;"></div>
             <div>
                 <button id="export-graphml">Exporter en GraphML</button>
@@ -29,6 +29,9 @@
         </div>
         <div class="content">
             <div id="graph-container" style="height: 600px;"></div>
+            <div id="legend-container" style="margin-top: 20px; padding: 10px; background: #f4f4f4; border: 1px solid #ccc;">
+                <h4>Legend</h4>
+            </div>
         </div>
     </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
