@@ -8,7 +8,6 @@ Statify is a Python application to analyze Spotify playlists with sorting featur
 
 1. Install Python 3.8 or higher.
 2. Install MongoDB and ensure it is running on `localhost:27017`.
-3. Install the required dependencies listed in `statify.sh` by running the script.
 
 ### Create a Spotify App
 
