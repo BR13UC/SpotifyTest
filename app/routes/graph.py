@@ -48,6 +48,7 @@ def get_artist_genre_graph_data():
             artist_genres = artist.get("genres", [])
             artist_color = "#cccccc"
             artist_size = 10
+            print(f"Processing artist: {artist_name}, Genres: {artist_genres}")
 
             nodes[artist_name] = {
                 'id': artist_name,
