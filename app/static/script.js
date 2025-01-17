@@ -195,6 +195,7 @@ const GraphPage = {
         this.fetchGraphOptions();
         this.setupGenerateGraphButton();
         this.setupExportEvent();
+        this.fetchFollowedArtists();
     },
 
     fetchGraphOptions() {

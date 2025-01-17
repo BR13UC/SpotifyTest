@@ -6,7 +6,7 @@ router_bp = Blueprint('router', __name__)
 @router_bp.route('/')
 def redirect_to_auth():
     if not is_valid_token():
-        return redirect(url_for('auth.authenticate'))
+        return redirect(url_for('auth.home'))
     return redirect(url_for('router.home'))
 
 @router_bp.route('/home')

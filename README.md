@@ -18,9 +18,11 @@ It will install all dependencies and stard mongo db.
 2. Log in with your Spotify account.
 3. Click on **Create App**.
 4. Set the Redirect URI to:
+
 ```bash
 http://localhost:5000/callback
 ```
+
 5. Note down the `Client ID` and `Client Secret` in the .env file.
 
 ```makefile
@@ -32,13 +34,8 @@ SPOTIPY_REDIRECT_URI=http://localhost:5000/callback
 ### Running the Application
 
 1. Run the app:
-   ```bash
-   ./run.sh
-   ```
+```bash
+./run.sh
+```
 
 2. Open your browser and go to [http://localhost:5000](http://localhost:5000).
-
-
-
-
-

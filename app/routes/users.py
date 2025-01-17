@@ -18,7 +18,7 @@ def get_profile():
             user_profile = sp.current_user()
             user_profile["_id"] = user_profile["id"]
             del user_profile["id"]
-            user_profile["last_updated"] = datetime.datetime.now(datetime.UTC)
+            user_profile["last_updated"] = datetime.datetime.utcnow().isoformat()
 
             set_collection('user_profile', user_profile)
             return jsonify(user_profile)
