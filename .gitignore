@@ -1,0 +1,12 @@
+# Ignore environment files
+.env
+
+# Ignore Python bytecode files
+*.pyc
+__pycache__/
+
+# Ignore virtual environment
+venv/
+
+# Ignore flask session files
+flask_session/
