@@ -6,6 +6,7 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 RESET='\033[0m'
 
+# python3 installation
 echo -e "${CYAN}Checking for Python3 installation...${RESET}"
 if ! command -v python3 &>/dev/null; then
   echo -e "${YELLOW}Python3 is not installed. Installing now...${RESET}"
@@ -16,6 +17,14 @@ else
   echo -e "${GREEN}Python3 is already installed.${RESET}"
 fi
 
+# venv setup
+echo -e "${CYAN}Setting up Python virtual environment...${RESET}"
+if [ ! -d "venv" ]; then
+    python3 -m venv venv
+fi
+source venv/bin/activate
+
+# MongoDB installation
 echo -e "${CYAN}Adding MongoDB repository...${RESET}"
 if ! grep -q "https://repo.mongodb.org/apt/ubuntu" /etc/apt/sources.list.d/mongodb-org-*.list 2>/dev/null; then
   wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
@@ -45,6 +54,7 @@ else
   exit 1
 fi
 
+# Python dependencies installation
 echo -e "${CYAN}Installing required Python packages...${RESET}"
 source venv/bin/activate
 
