@@ -13,4 +13,4 @@ def home():
 @auth_bp.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('home'))
+    return redirect(url_for('auth.home'))

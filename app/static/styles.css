@@ -23,7 +23,17 @@ body {
     margin: 0;
 }
 
-.profile {
+.logout-btn {
+    padding: 8px 15px;
+    background-color: var(--secondary-color);
+    color: white;
+    text-decoration: none;
+    border-radius: 5px;
+    margin-left: 10px;
+}
+
+.logout-btn:hover {
+    background-color: var(--primary-color);
 }
 
 .container {
