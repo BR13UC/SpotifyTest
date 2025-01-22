@@ -2,7 +2,7 @@ import datetime
 from flask import Blueprint, request, jsonify
 
 from app.db_connection import get_collection, set_collection, is_timestamp_stale
-from app.helpers import is_valid_token, sp
+from app.helpers import is_valid_token, get_spotify_client
 
 playlist_bp = Blueprint('playlist', __name__)
 
@@ -15,8 +15,11 @@ def get_playlists():
             print("Fetching playlists from Spotify API")
             if not is_valid_token():
                 return jsonify({'error': 'Not authenticated'}), 401
+            spoty_client = get_spotify_client()
+            if not spoty_client:
+                return jsonify({'error': 'Unable to create Spotify client'}), 500
 
-            playlists_response = sp.current_user_playlists()
+            playlists_response = spoty_client.current_user_playlists()
             playlists = playlists_response['items']
 
             playlists_data = {
@@ -48,10 +51,14 @@ def get_playlist_tracks():
             if not is_valid_token():
                 return jsonify({'error': 'Not authenticated'}), 401
 
+            spoty_client = get_spotify_client()
+            if not spoty_client:
+                return jsonify({'error': 'Unable to create Spotify client'}), 500
+
             offset = 0
             track_list = []
             while True:
-                response = sp.playlist_tracks(playlist_id, offset=offset)
+                response = spoty_client.playlist_tracks(playlist_id, offset=offset)
                 track_list.extend(response['items'])
                 if not response['next']:
                     break
@@ -80,8 +87,12 @@ def create_sorted_playlist():
     playlist_name = data.get('playlist_name', 'Sorted Playlist')
 
     track_ids = []
+    spoty_client = get_spotify_client()
+    if not spoty_client:
+        return jsonify({'error': 'Unable to create Spotify client'}), 500
+
     for title in track_titles:
-        results = sp.search(q=f'track:{title}', type='track', limit=1)
+        results = spoty_client.search(q=f'track:{title}', type='track', limit=1)
         items = results['tracks']['items']
 
         if items:
@@ -89,12 +100,12 @@ def create_sorted_playlist():
         else:
             print(f"No track found for title: {title}")
 
-    user_id = sp.current_user()['id']
-    new_playlist = sp.user_playlist_create(user_id, playlist_name)
+    user_id = spoty_client.current_user()['id']
+    new_playlist = spoty_client.user_playlist_create(user_id, playlist_name)
 
     chunk_size = 100
     for i in range(0, len(track_ids), chunk_size):
         chunk = track_ids[i:i + chunk_size]
-        sp.playlist_add_items(new_playlist['id'], chunk)
+        spoty_client.playlist_add_items(new_playlist['id'], chunk)
 
     return 'New playlist created with sorted track titles'
