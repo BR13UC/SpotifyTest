@@ -64,3 +64,38 @@ def get_followed_artists():
     except Exception as e:
         print(f"Error in get_followed_artists: {e}")
         return jsonify({'error': str(e)}), 500
+
+@user_bp.route('/get_liked_songs', methods=['GET'])
+def get_liked_songs():
+    try:
+        cached_liked_songs = get_collection('liked_songs').find_one()
+
+        if not cached_liked_songs or is_timestamp_stale(cached_liked_songs.get("last_updated")):
+            print("Fetching liked songs from Spotify API")
+            if not is_valid_token():
+                return jsonify({'error': 'Not authenticated'}), 401
+
+            liked_songs_list = []
+            offset = 0
+            while True:
+                response = sp.current_user_saved_tracks(limit=50, offset=offset)
+                liked_songs_list.extend(response['items'])
+
+                if not response['next']:
+                    break
+                offset += len(response['items'])
+
+            liked_songs_data = {
+                "_id": "liked_songs",
+                "total": len(liked_songs_list),
+                "songs": liked_songs_list,
+                "last_updated": datetime.datetime.utcnow().isoformat()
+            }
+
+            set_collection('liked_songs', liked_songs_data)
+
+            return jsonify(liked_songs_data)
+        return jsonify(cached_liked_songs)
+    except Exception as e:
+        print(f"Error in get_liked_songs: {e}")
+        return jsonify({'error': str(e)}), 500

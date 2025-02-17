@@ -11,7 +11,7 @@ def get_collection(collection_name):
     try:
         return db[collection_name]
     except Exception as e:
-        print(f"Error getting collection: {e}")
+        print(f"Error getting collection {collection_name}: {e}")
         return None
 
 def set_collection(collection_name, data):
@@ -23,7 +23,7 @@ def set_collection(collection_name, data):
         else:
             collection.insert_one(data)
     except Exception as e:
-        print(f"Error setting collection: {e}")
+        print(f"Error setting collection {collection_name}: {e}")
 
 def is_timestamp_stale(last_updated, max_age_days=1):
     current_time = datetime.utcnow()
@@ -40,4 +40,5 @@ def is_timestamp_stale(last_updated, max_age_days=1):
         return True
 
     max_age = timedelta(days=max_age_days)
+    # max_age = timedelta(seconds=10)
     return (current_time - last_updated_time) > max_age

@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify
 
 from app.db_connection import get_collection
-from app.helpers import export_artist_genre_graphml, get_genre_color_map, get_artist_color
+from app.helpers import export_artist_genre_graphml, count_liked_songs_by_artist
 
 graph_bp = Blueprint('graph', __name__)
 
@@ -10,9 +10,9 @@ def get_graph_options():
     try:
         graph_options = [
             {'id': '0', 'name': 'Liked Artists'},
-            {'id': '1', 'name': 'Playlist by Genre'},
-            {'id': '2', 'name': 'Playlist by Artist'},
-            {'id': '3', 'name': 'Artists Comparator'}
+            # {'id': '1', 'name': 'Playlist by Genre'},
+            # {'id': '2', 'name': 'Playlist by Artist'},
+            # {'id': '3', 'name': 'Artists Comparator'}
         ]
         return jsonify(graph_options)
     except Exception as e:
@@ -42,20 +42,20 @@ def get_artist_genre_graph_data():
         nodes = {}
         edges = []
         artists = followed_artists_data.get("artists", [])
+        i = 0
 
         for artist in artists:
             artist_name = artist.get("name", "Unknown Artist")
             artist_genres = artist.get("genres", [])
             artist_color = "#cccccc"
-            artist_size = 10
-            print(f"Processing artist: {artist_name}, Genres: {artist_genres}")
+            artist_size = 10 + count_liked_songs_by_artist(artist_name) or 10
 
             nodes[artist_name] = {
                 'id': artist_name,
                 'label': artist_name,
                 'group': 'artist',
                 'color': artist_color,
-                'size': artist_size
+                'size': artist_size,
             }
 
             for genre in artist_genres:
