@@ -27,8 +27,8 @@ source venv/bin/activate
 # MongoDB installation
 echo -e "${CYAN}Adding MongoDB repository...${RESET}"
 if ! grep -q "https://repo.mongodb.org/apt/ubuntu" /etc/apt/sources.list.d/mongodb-org-*.list 2>/dev/null; then
-  wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
-  echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+  wget -qO - https://www.mongodb.org/static/pgp/server-8.0.asc | sudo apt-key add -
+  echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu $(lsb_release -cs)/mongodb-org/8.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list
   sudo apt update
 fi
 
