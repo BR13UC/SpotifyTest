@@ -1,37 +1,22 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Statify</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-</head>
-<body id="sorts">
-    <div class="header">
-        <div class="title">
-            <h1>Statify</h1>
-        </div>
-        <div class="profile">
-        </div>
-    </div>
-    <div class="container">
-        <div class="sidebar">
-            <div>
-                <button onclick="window.location.href='/graphs';" class="nav-btn">Aller sur les Graphs</button>
-            </div>
-            <label for="sort-options">Liste des tris:</label>
-            <select id="sort-options" name="sort-options">
-            </select>
-            <label for="playlist-select">Liste des playlists:</label>
-            <select id="playlist-select" name="playlist">
-            </select>
-            <button id="start-sort-btn">Lancer le tri</button>
-            <div id="spinner" class="spinner" style="display: none;"></div>
-        </div>
-        <div class="content">
-            <div id="track-titles"></div>
-        </div>
-    </div>
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
-</body>
-</html>
+{% extends 'base.html' %}
+{% set active_page = 'sorts' %}
+{% block title %}Statify — Playlists{% endblock %}
+{% block page_id %}sorts{% endblock %}
+{% block content %}
+<div class="page-heading"><p class="eyebrow" data-en="Your collection">Votre collection</p><h1 data-en="Sort your playlists">Triez vos playlists</h1><p data-en="Choose a playlist, sort its tracks, then open any row for its details and sources.">Choisissez une playlist, triez ses titres, puis ouvrez une ligne pour voir ses détails et ses sources.</p></div>
+<div class="workspace-layout"><aside class="workspace-controls">
+  <section class="surface controls-card" aria-labelledby="sort-controls-title"><h2 id="sort-controls-title" data-en="Sort options">Options de tri</h2>
+    <label for="playlist-select" data-en="Playlist">Playlist</label><select id="playlist-select" name="playlist"></select>
+    <label for="sort-options" data-en="Sort by">Trier par</label><select id="sort-options" name="sort-options"></select>
+    <button id="start-sort-btn" class="button" type="button" data-en="Show sorted tracks">Afficher les titres triés</button>
+  </section>
+  <section class="surface controls-card" aria-labelledby="create-title"><h2 id="create-title" data-en="Create a playlist">Créer une playlist</h2><p data-en="The new playlist will be private on Spotify.">La nouvelle playlist sera privée sur Spotify.</p>
+    <label for="playlist-name" data-en="New playlist name">Nom de la nouvelle playlist</label><input id="playlist-name" type="text" maxlength="100">
+    <button id="create-playlist-btn" class="button button-secondary" type="button" disabled data-en="Create private playlist">Créer la playlist privée</button>
+  </section>
+</aside><div class="workspace-main">
+  <section class="surface result-card" aria-labelledby="tracks-title"><div class="section-heading"><div><p class="eyebrow" data-en="Result">Résultat</p><h2 id="tracks-title" data-en="Tracks">Titres</h2></div></div>
+    <p id="sort-status" class="status-line" role="status" aria-live="polite" data-en="Loading playlists…">Chargement des playlists…</p><div id="track-titles"></div>
+  </section>
+</div></div>
+{% endblock %}

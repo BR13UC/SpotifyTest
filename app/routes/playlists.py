@@ -1,100 +1,74 @@
-import datetime
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, jsonify, request, session
+from spotipy.exceptions import SpotifyException
 
-from app.db_connection import get_collection, set_collection, is_timestamp_stale
-from app.helpers import is_valid_token, sp
+from app import spotify_auth
+from app.services.playlist_data import get_items_for_user, get_playlists_for_user, sort_items
+from app.services import musicbrainz
+from app import storage
 
-playlist_bp = Blueprint('playlist', __name__)
+playlist_bp = Blueprint("playlist", __name__)
 
-@playlist_bp.route('/get_playlists', methods=['GET'])
+
+@playlist_bp.get("/get_playlists")
 def get_playlists():
-    try:
-        cached_playlists = get_collection('playlists').find_one()
+    playlists = get_playlists_for_user(session["spotify_user_id"])
+    return jsonify(total=len(playlists), playlists=playlists)
 
-        if not cached_playlists or is_timestamp_stale(cached_playlists.get("last_updated")):
-            print("Fetching playlists from Spotify API")
-            if not is_valid_token():
-                return jsonify({'error': 'Not authenticated'}), 401
 
-            playlists_response = sp.current_user_playlists()
-            playlists = playlists_response['items']
-
-            playlists_data = {
-                "_id": "playlists",
-                "total": len(playlists),
-                "playlists": playlists,
-                "last_updated": datetime.datetime.utcnow().isoformat()
-            }
-
-            set_collection('playlists', playlists_data)
-
-            return jsonify(playlists_data)
-
-        return jsonify(cached_playlists)
-    except Exception as e:
-        print(f"Error in get_playlists: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@playlist_bp.route('/get_playlist_tracks', methods=['POST'])
+@playlist_bp.post("/get_playlist_tracks")
 def get_playlist_tracks():
-    try:
-        data = request.json
-        playlist_id = data['playlist_id']
+    data = request.get_json(silent=True) or {}
+    playlist_id = data.get("playlist_id")
+    if not isinstance(playlist_id, str) or not playlist_id:
+        return jsonify(error="Identifiant de playlist requis."), 400
+    items = get_items_for_user(session["spotify_user_id"], playlist_id)
+    if items is None:
+        return jsonify(error="Playlist introuvable dans votre bibliothèque."), 404
+    spotify_genres = {artist["id"]: artist.get("genres") or [] for artist in storage.get_followed_artists(session["spotify_user_id"])}
+    return jsonify(total=len(items), tracks=[{
+        **item, "musicbrainz": musicbrainz.track_enrichment(session["spotify_user_id"], item, spotify_genres)
+    } for item in items])
 
-        cached_tracks = get_collection('playlist_tracks').find_one({"_id": playlist_id})
 
-        if not cached_tracks or is_timestamp_stale(cached_tracks.get("last_updated")):
-            print(f"Fetching tracks for playlist {playlist_id} from Spotify API")
-            if not is_valid_token():
-                return jsonify({'error': 'Not authenticated'}), 401
-
-            offset = 0
-            track_list = []
-            while True:
-                response = sp.playlist_tracks(playlist_id, offset=offset)
-                track_list.extend(response['items'])
-                if not response['next']:
-                    break
-                offset += len(response['items'])
-
-            tracks_data = {
-                "_id": playlist_id,
-                "total": len(track_list),
-                "tracks": track_list,
-                "last_updated": datetime.datetime.utcnow().isoformat()
-            }
-
-            set_collection('playlist_tracks', tracks_data)
-
-            return jsonify(tracks_data)
-
-        return jsonify(cached_tracks)
-    except Exception as e:
-        print(f"Error in get_playlist_tracks: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@playlist_bp.route('/create_sorted_playlist', methods=['POST'])
+@playlist_bp.post("/create_sorted_playlist")
 def create_sorted_playlist():
-    data = request.json
-    track_titles = data.get('track_titles', [])
-    playlist_name = data.get('playlist_name', 'Sorted Playlist')
-
-    track_ids = []
-    for title in track_titles:
-        results = sp.search(q=f'track:{title}', type='track', limit=1)
-        items = results['tracks']['items']
-
-        if items:
-            track_ids.append(items[0]['id'])
-        else:
-            print(f"No track found for title: {title}")
-
-    user_id = sp.current_user()['id']
-    new_playlist = sp.user_playlist_create(user_id, playlist_name)
-
-    chunk_size = 100
-    for i in range(0, len(track_ids), chunk_size):
-        chunk = track_ids[i:i + chunk_size]
-        sp.playlist_add_items(new_playlist['id'], chunk)
-
-    return 'New playlist created with sorted track titles'
+    data = request.get_json(silent=True) or {}
+    playlist_id = data.get("playlist_id")
+    sort_option = data.get("sort_option")
+    playlist_name = data.get("playlist_name")
+    if not all(isinstance(value, str) and value.strip() for value in (playlist_id, sort_option, playlist_name)):
+        return jsonify(error="Playlist, tri et nom requis."), 400
+    if len(playlist_name) > 100:
+        return jsonify(error="Le nom est trop long."), 400
+    user_id = session["spotify_user_id"]
+    items = get_items_for_user(user_id, playlist_id)
+    if items is None:
+        return jsonify(error="Playlist introuvable dans votre bibliothèque."), 404
+    try:
+        ordered = sort_items(items, sort_option)
+    except ValueError:
+        return jsonify(error="Option de tri inconnue."), 400
+    uris = [item["uri"] for item in ordered if item["exportable"]]
+    skipped_count = len(ordered) - len(uris)
+    if not uris:
+        return jsonify(error="Aucun titre Spotify ajoutable."), 400
+    spotify = spotify_auth.get_spotify()
+    new_playlist = spotify.current_user_playlist_create(playlist_name.strip(), public=False)
+    added_count = 0
+    for start in range(0, len(uris), 100):
+        batch = uris[start:start + 100]
+        try:
+            spotify.playlist_add_items(new_playlist["id"], batch)
+        except SpotifyException:
+            return jsonify(
+                error="La playlist a été créée, mais l'ajout des titres a été interrompu.",
+                id=new_playlist["id"],
+                url=(new_playlist.get("external_urls") or {}).get("spotify"),
+                created_count=added_count, skipped_count=skipped_count,
+            ), 502
+        added_count += len(batch)
+    return jsonify(
+        id=new_playlist["id"],
+        url=(new_playlist.get("external_urls") or {}).get("spotify"),
+        created_count=len(uris), skipped_count=skipped_count,
+    ), 201

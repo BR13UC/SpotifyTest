@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+{% set active_page = 'timeline' %}
+{% block title %}Statify — Timeline{% endblock %}
+{% block page_id %}timeline{% endblock %}
+{% block content %}
+<div class="page-heading"><p class="eyebrow" data-en="Chronology">Chronologie</p><h1 data-en="Artist timeline">Timeline des artistes</h1><p data-en="Lifetimes and Spotify releases of your followed artists.">Vies et sorties Spotify des artistes que vous suivez.</p></div>
+<section class="surface timeline-card" aria-label="Timeline des artistes" data-en-aria-label="Artist timeline">
+  <p id="timeline-status" class="status-line" role="status" aria-live="polite"></p>
+  <button id="timeline-retry" class="button button-secondary" type="button" hidden data-en="Retry failed discographies">Réessayer les discographies en échec</button>
+  <div class="timeline-legend" aria-label="Légende" data-en-aria-label="Legend">
+    <span><i class="timeline-key timeline-active"></i><span data-en="Active">En vie / actif</span></span>
+    <span><i class="timeline-key timeline-ended"></i><span data-en="Deceased / dissolved">Décédé / dissous</span></span>
+    <span><i class="timeline-key timeline-unknown"></i><span data-en="Status unknown">Statut inconnu</span></span>
+    <span><i class="timeline-key timeline-album"></i>Album</span>
+    <span><i class="timeline-key timeline-single"></i>Single</span>
+    <span><i class="timeline-key timeline-compilation"></i>Compilation</span>
+  </div>
+  <div id="timeline-chart" class="timeline-chart" hidden>
+    <div id="timeline-names" class="timeline-names"></div>
+    <div id="timeline-scroll" class="timeline-scroll" tabindex="0" aria-label="Timeline, défilement horizontal" data-en-aria-label="Timeline, horizontal scrolling">
+      <div id="timeline-plot" class="timeline-plot"><div id="timeline-axis" class="timeline-axis"></div><div id="timeline-rows"></div></div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='timeline_core.js') }}"></script><script src="{{ url_for('static', filename='timeline.js') }}"></script>{% endblock %}

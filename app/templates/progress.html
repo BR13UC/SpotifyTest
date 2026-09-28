@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% set active_page = 'progress' %}
+{% block title %}Statify — Avancement{% endblock %}
+{% block page_id %}progress{% endblock %}
+{% block content %}
+<div class="page-heading"><p class="eyebrow">MusicBrainz</p><h1 data-en="Matching progress">Avancement des correspondances</h1><p data-en="Follow the analysis of tracks and artists already loaded from Spotify. Processing continues when you leave this page.">Suivez l’analyse des titres et artistes déjà chargés depuis Spotify. Le traitement continue quand vous quittez cette page.</p></div>
+<div class="progress-tabs" role="tablist" aria-label="Type de correspondance" data-en-aria-label="Match type">
+  <button id="tab-recording" type="button" role="tab" aria-controls="panel-recording" aria-selected="true" tabindex="0" data-en="Tracks">Titres</button>
+  <button id="tab-artist" type="button" role="tab" aria-controls="panel-artist" aria-selected="false" tabindex="-1" data-en="Artists">Artistes</button>
+</div>
+{% for kind, label, english in [('recording', 'Titres', 'Tracks'), ('artist', 'Artistes', 'Artists')] %}
+<div id="panel-{{ kind }}" role="tabpanel" aria-labelledby="tab-{{ kind }}" tabindex="0" {% if kind == 'artist' %}hidden{% endif %}>
+  <section class="surface progress-card" aria-labelledby="progress-title-{{ kind }}"><div class="section-heading"><h2 id="progress-title-{{ kind }}" data-en="Automatic analysis">Analyse automatique</h2><strong id="progress-percent-{{ kind }}">—</strong></div>
+    <progress id="{{ kind }}-progress" max="1" value="0" aria-describedby="progress-count-{{ kind }} progress-state-{{ kind }}"></progress><p id="progress-count-{{ kind }}">—</p><p id="progress-state-{{ kind }}" class="status-line" role="status" aria-live="polite"></p>
+    <div class="progress-stats" aria-label="Résultats des {{ label|lower }}" data-en-aria-label="{{ english }} results"><div><strong id="progress-confirmed-{{ kind }}">—</strong><span data-en="confirmed">confirmés</span></div><div><strong id="progress-reviews-{{ kind }}">—</strong><span data-en="to review">à vérifier</span></div><div><strong id="progress-not-found-{{ kind }}">—</strong><span data-en="not found">introuvables</span></div><div><strong id="progress-queued-{{ kind }}">—</strong><span data-en="queued">dans la file</span></div></div>
+    {% if kind == 'artist' %}<p id="artist-origin-coverage" class="progress-coverage"></p>{% endif %}
+  </section>
+  <p class="progress-note" data-en="Items to review count as processed: automatic analysis is complete, but your choice is still needed.">Les {{ label|lower }} à vérifier sont comptés comme traités : l’analyse automatique est terminée, mais votre choix reste nécessaire.</p>
+  <section class="surface mb-panel" aria-labelledby="reviews-title-{{ kind }}"><h2 id="reviews-title-{{ kind }}" data-en="{{ english }} to review">{{ label }} à vérifier</h2><p id="reviews-status-{{ kind }}" class="status-line" role="status" aria-live="polite"></p><div id="reviews-list-{{ kind }}"></div></section>
+</div>
+{% endfor %}
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='progress.js') }}" defer></script>{% endblock %}

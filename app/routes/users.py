@@ -1,66 +1,41 @@
-import datetime
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, session
 
-from app.db_connection import get_collection, set_collection, is_timestamp_stale
-from app.helpers import is_valid_token, sp
+from app import spotify_auth, storage
+from app.services import musicbrainz
 
-user_bp = Blueprint('user', __name__)
+user_bp = Blueprint("user", __name__)
 
-@user_bp.route('/get_profile', methods=['GET'])
+
+@user_bp.get("/get_profile")
 def get_profile():
-    try:
-        cached_profile = get_collection('user_profile').find_one()
+    user_id = session["spotify_user_id"]
+    cached, updated_at = storage.get_cache(user_id, "profile")
+    if cached is None or storage.is_stale(updated_at):
+        cached = spotify_auth.get_spotify().current_user()
+        if cached.get("id") != user_id:
+            return jsonify(error="Le compte Spotify a changé. Reconnectez-vous."), 401
+        storage.set_cache(user_id, "profile", cached)
+    return jsonify(cached)
 
-        if not cached_profile or is_timestamp_stale(cached_profile.get("last_updated")):
-            if not is_valid_token():
-                return jsonify({'error': 'Not authenticated'}), 401
 
-            user_profile = sp.current_user()
-            user_profile["_id"] = user_profile["id"]
-            del user_profile["id"]
-            user_profile["last_updated"] = datetime.datetime.utcnow().isoformat()
-
-            set_collection('user_profile', user_profile)
-            return jsonify(user_profile)
-
-        return jsonify(cached_profile)
-    except Exception as e:
-        print(f"Error in get_profile: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@user_bp.route('/get_followed_artists', methods=['GET'])
+@user_bp.get("/get_followed_artists")
 def get_followed_artists():
-    try:
-        cached_artists = get_collection('followed_artists').find_one()
-
-        if not cached_artists or is_timestamp_stale(cached_artists.get("last_updated")):
-            print("Fetching followed artists from Spotify API")
-            if not is_valid_token():
-                return jsonify({'error': 'Not authenticated'}), 401
-
-            artists_list = []
-            after = None
-            while True:
-                response = sp.current_user_followed_artists(limit=50, after=after)
-                artists = response['artists']
-                artists_list.extend(artists['items'])
-
-                if not artists['next']:
-                    break
-                after = artists['cursors']['after']
-
-            followed_artists_data = {
-                "_id": "followed_artists",
-                "total": len(artists_list),
-                "artists": artists_list,
-                "last_updated": datetime.datetime.utcnow().isoformat()
-            }
-
-            set_collection('followed_artists', followed_artists_data)
-
-            return jsonify(followed_artists_data)
-
-        return jsonify(cached_artists)
-    except Exception as e:
-        print(f"Error in get_followed_artists: {e}")
-        return jsonify({'error': str(e)}), 500
+    user_id = session["spotify_user_id"]
+    cached, updated_at = storage.get_cache(user_id, "followed_artists")
+    if cached is None or storage.is_stale(updated_at):
+        artists = []
+        after = None
+        spotify = spotify_auth.get_spotify()
+        while True:
+            page = spotify.current_user_followed_artists(limit=50, after=after)["artists"]
+            artists.extend(page.get("items", []))
+            if not page.get("next"):
+                break
+            after = page.get("cursors", {}).get("after")
+            if not after:
+                break
+        storage.replace_followed_artists(user_id, artists)
+    else:
+        artists = storage.get_followed_artists(user_id)
+    musicbrainz.enqueue_followed(user_id, artists)
+    return jsonify(total=len(artists), artists=artists)

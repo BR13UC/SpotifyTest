@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ session.get('csrf_token', '') }}">
+  <title>{% block title %}Statify{% endblock %}</title>
+  <script>try { const mode = localStorage.getItem('statify-theme') || 'system'; document.documentElement.dataset.theme = mode; document.documentElement.lang = localStorage.getItem('statify-lang') || 'fr'; } catch (_) {}</script>
+  {% block extra_head %}{% endblock %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body id="{% block page_id %}{% endblock %}">
+  <a class="skip-link" href="#main-content" data-en="Skip to content">Aller au contenu</a>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a class="brand" href="{{ url_for('router.home') }}" aria-label="Statify — accueil" data-en-aria-label="Statify — home"><span class="brand-mark" aria-hidden="true">◉</span> Statify</a>
+      <button class="mobile-nav-toggle icon-button" type="button" aria-controls="site-nav" aria-expanded="false" data-en-aria-label="Open menu" aria-label="Ouvrir le menu">☰</button>
+      <nav id="site-nav" class="site-nav" aria-label="Navigation principale" data-en-aria-label="Main navigation">
+        <a href="{{ url_for('router.home') }}" {% if active_page == 'home' %}aria-current="page"{% endif %} data-en="Home">Accueil</a>
+        <a href="{{ url_for('router.sort_page') }}" {% if active_page == 'sorts' %}aria-current="page"{% endif %} data-en="Playlists">Playlists</a>
+        <a href="{{ url_for('router.graphs_page') }}" {% if active_page == 'graphs' %}aria-current="page"{% endif %} data-en="Graph">Graphe</a>
+        <a href="{{ url_for('router.map_page') }}" {% if active_page == 'map' %}aria-current="page"{% endif %} data-en="Map">Carte</a>
+        <a href="{{ url_for('router.timeline_page') }}" {% if active_page == 'timeline' %}aria-current="page"{% endif %} data-en="Timeline">Timeline</a>
+        <a href="{{ url_for('router.progress_page') }}" {% if active_page == 'progress' %}aria-current="page"{% endif %} data-en="Progress">Avancement</a>
+      </nav>
+      <div class="header-actions">
+        <a class="icon-button settings-link" href="{{ url_for('router.settings_page') }}" {% if active_page == 'settings' %}aria-current="page"{% endif %} aria-label="Paramètres" data-en-aria-label="Settings" title="Paramètres" data-en-title="Settings">⚙</a>
+        <div class="profile" aria-label="Compte Spotify" data-en-aria-label="Spotify account"></div>
+      </div>
+    </div>
+  </header>
+  <main id="main-content" class="page-shell">{% block content %}{% endblock %}</main>
+  <div id="detail-backdrop" class="detail-backdrop" hidden></div>
+  <aside id="detail-panel" class="detail-panel" aria-labelledby="detail-title" aria-modal="true" role="dialog" tabindex="-1" hidden>
+    <div class="detail-header"><div><p class="eyebrow" id="detail-kicker"></p><h2 id="detail-title"></h2></div><button id="detail-close" class="icon-button" type="button" aria-label="Fermer les détails" data-en-aria-label="Close details">×</button></div>
+    <div id="detail-content" class="detail-content"></div>
+  </aside>
+  <script src="{{ url_for('static', filename='ui.js') }}"></script>
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,40 +1,30 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Statify</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-</head>
-<body id="graphs">
-    <div class="header">
-        <div class="title">
-            <h1>Statify</h1>
-        </div>
-        <div class="profile">
-        </div>
-    </div>
-    <div class="container">
-        <div class="sidebar">
-            <div>
-                <button onclick="window.location.href='/sorts';" class="nav-btn">Aller sur les Tris</button>
-            </div>
-                <label for="graph-options">Liste des graphs:</label>
-                <select id="graph-options" name="graph-options"></select>
-                <button id="create-graph-btn">Dessiner le graph</button>
-            <div id="spinner" class="spinner" style="display: none;"></div>
-            <div>
-                <button id="export-graphml">Exporter en GraphML</button>
-            </div>
-        </div>
-        <div class="content">
-            <div id="graph-container" style="height: 600px;"></div>
-            <div id="legend-container" style="margin-top: 20px; padding: 10px; background: #f4f4f4; border: 1px solid #ccc;">
-                <h4>Legend</h4>
-            </div>
-        </div>
-    </div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
-</body>
-</html>
+{% extends 'base.html' %}
+{% set active_page = 'graphs' %}
+{% block title %}Statify — Graphe{% endblock %}
+{% block page_id %}graphs{% endblock %}
+{% block content %}
+<div class="page-heading"><p class="eyebrow" data-en="Connections">Connexions</p><h1 data-en="Explore your music graph">Explorez votre graphe musical</h1><p data-en="Hover for a quick summary. Select a node or a year for details.">Survolez pour un aperçu. Sélectionnez un nœud ou une année pour les détails.</p></div>
+<div class="workspace-layout"><aside class="workspace-controls"><section class="surface controls-card"><h2 data-en="Display">Affichage</h2>
+  <label for="graph-type" data-en="Graph type">Type de graphe</label><select id="graph-type"><option value="artist_genre" data-en="Followed artists and genres">Artistes suivis et genres</option><option value="release_years" data-en="Tracks by release year">Titres par année de sortie</option></select>
+  <div id="artist-graph-controls" class="graph-mode"><label for="graph-search" data-en="Search for an artist">Rechercher un artiste</label><input id="graph-search" type="search" placeholder="Nom de l’artiste" data-en-placeholder="Artist name">
+    <label for="graph-genre" data-en="Filter by genre">Filtrer par genre</label><select id="graph-genre"><option value="" data-en="All genres">Tous les genres</option></select>
+    <button id="graph-select-genre" class="button button-quiet" type="button" disabled data-en="View genre details">Voir les détails du genre</button>
+    <div class="button-row"><button id="graph-overview-btn" class="button button-secondary" type="button" data-en="Overview">Vue d’ensemble</button><button id="create-graph-btn" class="button button-secondary" type="button" data-en="Refresh">Actualiser</button></div>
+    <button id="export-graphml" class="button button-quiet" type="button" data-en="Export GraphML">Exporter en GraphML</button>
+  </div>
+  <div id="release-graph-controls" class="graph-mode" hidden><label for="release-playlist" data-en="Playlist">Playlist</label><select id="release-playlist" disabled><option value="" data-en="Loading playlists…">Chargement des playlists…</option></select></div>
+</section></aside><div class="workspace-main">
+  <section id="artist-graph-view" class="graph-mode surface graph-card"><p id="graph-status" class="status-line" role="status" aria-live="polite"></p><div id="graph-loading" class="graph-loading" hidden aria-hidden="true"><span class="spinner"></span><span data-en="Loading graph…">Chargement du graphe…</span></div>
+    <p id="graph-likes-status" class="status-line" role="status" aria-live="polite"></p><div id="graph-likes-loading" class="graph-loading" hidden aria-hidden="true"><span class="spinner"></span><span data-en="Loading liked tracks…">Chargement des titres likés…</span></div>
+    <details class="graph-metrics-wrap"><summary data-en="Performance details">Détails de performance</summary><p id="graph-metrics" class="graph-metrics"></p></details>
+    <div id="graph-container" class="graph-network" aria-label="Réseau des artistes et des genres" data-en-aria-label="Artist and genre network"></div>
+    <div id="graph-details" hidden></div>
+    <div id="legend-container" class="graph-legend"><strong data-en="Legend">Légende</strong><p data-en="Artist size reflects liked tracks. Genre size reflects linked artists. Select an item to view its links and sources.">La taille des artistes reflète les titres likés. Celle des genres reflète les artistes liés. Sélectionnez un élément pour voir ses liens et leurs sources.</p><div id="graph-family-legend"></div></div>
+  </section>
+  <section id="release-graph-view" class="graph-mode surface graph-card" hidden><h2 id="release-graph-title" data-en="Tracks by release year">Titres par année de sortie</h2><p id="release-status" class="status-line" role="status" aria-live="polite"></p><p id="release-summary"></p>
+    <div id="release-chart" class="release-chart" hidden><svg id="release-axis" class="release-axis" width="54" height="350" aria-label="Nombre de titres" data-en-aria-label="Track count"></svg><div id="release-scroll" class="release-scroll" tabindex="0" aria-label="Graphe chronologique, défilement horizontal" data-en-aria-label="Timeline, horizontal scroll"><svg id="release-bars" height="350" role="img" aria-label="Nombre de titres par année" data-en-aria-label="Tracks by year"></svg></div></div>
+    <p id="release-undated"></p><div id="release-details" hidden></div>
+  </section>
+</div></div>
+{% endblock %}
+{% block scripts %}<script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>{% endblock %}

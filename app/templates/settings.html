@@ -1,17 +1,10 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sortify Settings</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-</head>
-<body>
-    <h1>Settings</h1>
-    <p>Choose your color scheme:</p>
-    <button id="green-theme-btn">Green Theme</button>
-    <button id="purple-theme-btn">Purple Theme</button>
-    <a href="/">Back to Sortify</a>
-    <script src="{{ url_for('static', filename='script.js') }}"></script>
-</body>
-</html>
+{% extends 'base.html' %}
+{% set active_page = 'settings' %}
+{% block title %}Statify — Paramètres{% endblock %}
+{% block page_id %}settings{% endblock %}
+{% block content %}
+<div class="page-heading"><p class="eyebrow" data-en="Preferences">Préférences</p><h1 data-en="Settings">Paramètres</h1><p data-en="Make Statify comfortable for you. These preferences stay in this browser.">Personnalisez votre expérience. Ces préférences restent dans ce navigateur.</p></div>
+<div class="settings-grid"><section class="surface" aria-labelledby="language-title"><h2 id="language-title" data-en="Language">Langue</h2><p data-en="Choose the language of navigation, details, charts and messages.">Choisissez la langue de la navigation, des détails, des graphiques et des messages.</p><div class="segmented" role="group" aria-label="Langue" data-en-aria-label="Language"><button type="button" data-lang-option="fr" lang="fr">Français</button><button type="button" data-lang-option="en" lang="en">English</button></div></section>
+<section class="surface" aria-labelledby="theme-title"><h2 id="theme-title" data-en="Appearance">Apparence</h2><p data-en="Choose a theme or follow your device setting.">Choisissez un thème ou suivez le réglage de votre appareil.</p><div class="segmented" role="group" aria-label="Apparence" data-en-aria-label="Appearance"><button type="button" data-theme-option="light" data-en="Light">Clair</button><button type="button" data-theme-option="dark" data-en="Dark">Sombre</button><button type="button" data-theme-option="system" data-en="System">Système</button></div></section>
+<section class="surface" aria-labelledby="account-title"><h2 id="account-title" data-en="Spotify account">Compte Spotify</h2><p data-en="Your data stays associated with the connected account.">Vos données restent associées au compte connecté.</p><a class="button button-secondary" href="/auth/logout" data-en="Sign out">Se déconnecter</a></section></div>
+{% endblock %}
