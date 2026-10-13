@@ -18,15 +18,17 @@ MARGIN = 15
 
 def library_tracks(user_id, spotify_id):
     """Use only collections already loaded, without Spotify account credentials."""
+    # instr() only skips rows that cannot mention the artist; the exact check below still decides.
     with storage.connect() as db:
         items = [json.loads(row['payload']) for row in db.execute(
-            "SELECT payload FROM playlist_items WHERE user_id=?", (user_id,))]
-        liked = db.execute("SELECT payload FROM cache_entries WHERE user_id=? "
-                           "AND resource='liked_collection' AND cache_key=''", (user_id,)).fetchone()
-        if liked:
-            items.extend(json.loads(liked['payload']).get('tracks', []))
+            "SELECT payload FROM playlist_items WHERE user_id=? AND instr(payload,?)", (user_id, spotify_id))]
+        items.extend(json.loads(row['value']) for row in db.execute(
+            "SELECT track.value FROM cache_entries AS liked, json_each(liked.payload,'$.tracks') AS track "
+            "WHERE liked.user_id=? AND liked.resource='liked_collection' AND liked.cache_key='' "
+            "AND instr(track.value,?)", (user_id, spotify_id)))
         items.extend(json.loads(row['spotify_payload']) for row in db.execute(
-            "SELECT spotify_payload FROM mb_matches WHERE user_id=? AND kind='recording'", (user_id,)))
+            "SELECT spotify_payload FROM mb_matches WHERE user_id=? AND kind='recording' "
+            "AND instr(spotify_payload,?)", (user_id, spotify_id)))
     tracks = {}
     for item in items:
         if item.get('is_local') or item.get('name') == 'Titre indisponible':
