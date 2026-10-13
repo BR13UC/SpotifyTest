@@ -828,3 +828,17 @@ def test_batched_lookup_failures_count_once_per_job_and_account(app, monkeypatch
         assert mb_queue.progress_for("bob", "artist")["errors"]["failed"] == 1
         assert not mb_queue.process_one()  # Waiting for retries does not count as another failure.
         assert mb_queue.progress_for("alice", "artist")["errors"]["failed"] == 2
+
+
+def test_purge_cache_removes_only_entries_no_reader_accepts(app):
+    now = datetime.now(timezone.utc)
+    with app.app_context():
+        with storage.connect() as db:
+            db.executemany("INSERT INTO mb_http_cache VALUES(?,?,?)", [
+                ("old", "{}", (now - mb_client.CACHE_AGE - timedelta(hours=1)).isoformat()),
+                ("recent", "{}", (now - mb_client.CACHE_AGE + timedelta(hours=1)).isoformat()),
+                ("fresh", "{}", now.isoformat()),
+            ])
+        assert mb_client.purge_cache(batch=1) == 1
+        with storage.connect() as db:
+            assert {row[0] for row in db.execute("SELECT cache_key FROM mb_http_cache")} == {"recent", "fresh"}

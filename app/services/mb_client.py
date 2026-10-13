@@ -3,7 +3,7 @@
 import json
 import time
 import unicodedata
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -93,6 +93,19 @@ def request(path, params=None):
             (key, _json(result), storage.now()),
         )
     return result
+
+
+def purge_cache(batch=5000):
+    """Delete cache entries older than any reader accepts; small batches keep write locks short."""
+    cutoff = (datetime.now(timezone.utc) - CACHE_AGE).isoformat()
+    deleted = 0
+    while True:
+        with storage.connect() as db:
+            count = db.execute("DELETE FROM mb_http_cache WHERE rowid IN "
+                               "(SELECT rowid FROM mb_http_cache WHERE updated_at<? LIMIT ?)", (cutoff, batch)).rowcount
+        deleted += count
+        if count < batch:
+            return deleted
 
 
 def _candidate(entity):

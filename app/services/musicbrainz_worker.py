@@ -3,8 +3,11 @@
 import time
 
 from app import create_app, storage
+from app.services.mb_client import purge_cache
 from app.services.mb_queue import enqueue_rechecks, process_one
 from app.services.geography import process_area_one, recover_areas
+
+PURGE_EVERY = 24 * 3600
 
 
 def main():
@@ -12,8 +15,12 @@ def main():
     with app.app_context():
         storage.wait_for_database(enqueue_rechecks)
         storage.wait_for_database(recover_areas)
+        next_purge = 0
         while True:
             try:
+                if time.monotonic() >= next_purge:
+                    purge_cache()
+                    next_purge = time.monotonic() + PURGE_EVERY
                 area_work = False
                 for _ in range(5):
                     if not process_area_one():
