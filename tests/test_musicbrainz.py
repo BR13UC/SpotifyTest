@@ -350,8 +350,8 @@ def test_release_context_reads_recording_membership_and_group_type(app, monkeypa
     monkeypatch.setattr(mb_client, "request", fake_request)
     with app.app_context():
         context = recording_matching._release_context("recording-one")
-    assert calls[0][0] == "release"
-    assert calls[0][1]["recording"] == "recording-one"
+    # Fewer releases than the lookup limit: the shared recording lookup is complete, no browse needed.
+    assert calls == [("recording/recording-one", {"inc": mb_client.RECORDING_INC})]
     assert context[0]["group_type"] == "ep"
     assert context[0]["artist_names"] == ["Singer"]
 
@@ -525,15 +525,32 @@ def test_bother_fallback_rejects_incompatible_recordings(app, monkeypatch, confl
 def test_release_context_paginates_all_editions(app, monkeypatch):
     offsets = []
 
-    def request(_path, params):
+    def request(path, params):
+        if path == "recording/bother":
+            # A full lookup page may be truncated, so every edition is browsed instead.
+            return {"releases": [{"id": f"lookup-{index}"} for index in range(mb_client.LOOKUP_LIMIT)]}
         offsets.append(params["offset"])
         return {"release-count": 2, "releases": [{"id": str(params["offset"]), "title": "Stone Sour",
                 "release-group": {"id": "shared-group", "primary-type": "Album"}}]}
 
     monkeypatch.setattr(mb_client, "request", request)
     with app.app_context():
-        assert len(recording_matching._release_context("bother")) == 2
+        assert [item["id"] for item in recording_matching._release_context("bother")] == ["0", "1"]
     assert offsets == [0, 1]
+
+
+def test_recording_details_reuse_the_release_context_lookup(app, monkeypatch):
+    calls = []
+
+    def fake_request(path, params=None):
+        calls.append((path, params))
+        return {"id": "recording-one", "title": "Song", "first-release-date": "2020", "releases": []}
+
+    monkeypatch.setattr(mb_client, "request", fake_request)
+    with app.app_context():
+        recording_matching._release_context("recording-one")
+        mb_client._details("recording", "recording-one")
+    assert calls[0] == calls[1]
 
 
 def test_version_three_rechecks_once_and_preserves_existing_decisions(app, monkeypatch):

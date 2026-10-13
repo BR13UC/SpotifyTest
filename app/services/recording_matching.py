@@ -136,21 +136,28 @@ def _credit_names(credit):
             if isinstance(part, dict) and isinstance(part.get("artist"), dict)]
 
 
+def _release_item(item):
+    group = item.get("release-group") or {}
+    return {"id": item.get("id"), "title": item.get("title") or group.get("title") or "",
+            "date": item.get("date") or group.get("first-release-date"),
+            "group_id": group.get("id"),
+            "group_type": (group.get("primary-type") or group.get("type") or "").casefold(),
+            "artist_names": _credit_names(item.get("artist-credit") or group.get("artist-credit"))}
+
+
 def _release_context(mbid):
-    """Browse actual releases containing this recording, including their release groups."""
+    """Actual releases containing this recording, including their release groups."""
+    # The lookup is shared with _details through the HTTP cache, but lists at most 25 releases.
+    lookup = mb_client.request(f"recording/{mbid}", {"inc": mb_client.RECORDING_INC}).get("releases")
+    if lookup is not None and len(lookup) < mb_client.LOOKUP_LIMIT:
+        return [_release_item(item) for item in lookup]
     releases = []
     offset = 0
     while True:
         result = mb_client.request("release", {"recording": mbid, "inc": "release-groups+artist-credits",
                                      "limit": 100, "offset": offset})
         page = result.get("releases") or []
-        for item in page:
-            group = item.get("release-group") or {}
-            releases.append({"id": item.get("id"), "title": item.get("title") or group.get("title") or "",
-                             "date": item.get("date") or group.get("first-release-date"),
-                             "group_id": group.get("id"),
-                             "group_type": (group.get("primary-type") or group.get("type") or "").casefold(),
-                             "artist_names": _credit_names(item.get("artist-credit") or group.get("artist-credit"))})
+        releases.extend(_release_item(item) for item in page)
         offset += len(page)
         if not page or offset >= result.get("release-count", offset):
             break

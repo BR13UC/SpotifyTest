@@ -15,6 +15,9 @@ BASE_URL = "https://musicbrainz.org/ws/2"
 USER_AGENT = "Statify/0.2 (https://github.com/brieucmevel1/SpotifyTest)"
 CACHE_AGE = timedelta(days=30)
 NEGATIVE_CACHE_AGE = timedelta(days=7)
+# One recording lookup serves both the release context and the details of the selected recording.
+RECORDING_INC = "genres+releases+release-groups+artist-credits"
+LOOKUP_LIMIT = 25
 
 
 def _json(value):
@@ -129,7 +132,7 @@ def _genres(entity, kind, mbid):
 
 
 def _details(kind, mbid):
-    entity = request(f"{kind}/{mbid}", {"inc": "genres"})
+    entity = request(f"{kind}/{mbid}", {"inc": RECORDING_INC if kind == "recording" else "genres"})
     if not entity.get("id"):
         return None
     details = {"source": "musicbrainz", "external_id": mbid, "name": entity.get("name") or entity.get("title"),
