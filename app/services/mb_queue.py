@@ -301,7 +301,9 @@ def status_for(user_id):
                                      "JOIN followed_artists AS f ON f.user_id=m.user_id AND f.artist_id=m.spotify_id "
                                      "WHERE m.user_id=? AND m.kind='artist'", (user_id,)).fetchone()[0]
         artist_total = db.execute("SELECT COUNT(*) FROM mb_matches WHERE user_id=? AND kind='artist'", (user_id,)).fetchone()[0]
-        origin = db.execute("SELECT enriched FROM mb_matches WHERE user_id=? AND kind='artist' AND status='confirmed'", (user_id,)).fetchall()
+        # Counted in SQL: decoding every confirmed artist's JSON was the slowest part of this frequent poll.
+        with_origin = db.execute("SELECT COUNT(*) FROM mb_matches WHERE user_id=? AND kind='artist' AND status='confirmed' "
+                                 "AND json_extract(enriched,'$.origin') NOT IN ('{}','[]','',0)", (user_id,)).fetchone()[0]
     counts = {"pending": 0, "confirmed": 0, "ambiguous": 0, "not_found": 0}
     counts.update({row["status"]: row["total"] for row in rows})
     counts["recordings"] = {"pending": 0, "confirmed": 0, "ambiguous": 0, "not_found": 0}
@@ -315,7 +317,7 @@ def status_for(user_id):
     counts["revision"] = revision
     counts["artist_revision"] = artist_revision
     counts["artists_total"] = artist_total
-    counts["artists_with_origin"] = sum(bool(json.loads(row["enriched"]).get("origin")) for row in origin if row["enriched"])
+    counts["artists_with_origin"] = with_origin
     return counts
 
 

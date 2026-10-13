@@ -859,3 +859,16 @@ def test_purge_cache_removes_only_entries_no_reader_accepts(app):
         assert mb_client.purge_cache(batch=1) == 1
         with storage.connect() as db:
             assert {row[0] for row in db.execute("SELECT cache_key FROM mb_http_cache")} == {"recent", "fresh"}
+
+
+def test_status_counts_only_confirmed_artists_with_an_origin(app):
+    rows = [("with-origin", "confirmed", '{"origin": {"name": "Paris"}}'),
+            ("null-origin", "confirmed", '{"origin": null}'),
+            ("no-origin", "confirmed", '{"genres": []}'),
+            ("not-enriched", "confirmed", None),
+            ("ambiguous", "ambiguous", '{"origin": {"name": "Lyon"}}')]
+    with app.app_context():
+        with storage.connect() as db:
+            db.executemany("INSERT INTO mb_matches(user_id,kind,spotify_id,spotify_payload,status,enriched,updated_at) "
+                           "VALUES('alice','artist',?,'{}',?,?,?)", [(*row, storage.now()) for row in rows])
+        assert mb_queue.status_for("alice")["artists_with_origin"] == 1
