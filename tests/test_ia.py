@@ -162,7 +162,8 @@ def test_grid_counts_deduplication_and_limits(app):
         duplicate=learning.grid(small_grid(periods=['all','all']))
         assert duplicate['configurations']==2 and duplicate['references']==1
         assert not learning.grid(small_grid(max_configurations=1))['within_limit']
-        with pytest.raises(Exception): learning.grid(small_grid(forest={'n_estimators':[0]}))
+        with pytest.raises(Exception):
+            learning.grid(small_grid(forest={'n_estimators':[0]}))
     seed(app)
     assert post(client_for(app),'campaigns',small_grid(max_configurations=1)).status_code==400
 
@@ -170,7 +171,8 @@ def test_grid_counts_deduplication_and_limits(app):
 def test_frozen_splits_and_target_features_do_not_leak(app):
     seed(app)
     with app.app_context():
-        key=learning.dataset('alice'); frozen=learning.load_dataset('alice',key)
+        key=learning.dataset('alice')
+        frozen=learning.load_dataset('alice',key)
         test=set(frozen['test'])
         for split in frozen['splits']:
             assert not test & set(split['train']+split['validation'])
@@ -196,14 +198,16 @@ def test_campaign_training_finalize_activate_and_rollback(app):
     response=post(client,'campaigns',small_grid())
     assert response.status_code==202
     with app.app_context():
-        for _ in range(9): assert worker.process_one()
+        for _ in range(9):
+            assert worker.process_one()
         assert not worker.process_one()
     results=client.get('/ia/api/results').json
     assert results['campaigns'][0]['state']=='completed'
     assert len(results['results'])==3 and all(r['complete'] for r in results['results'])
     chosen=results['results'][0]
     assert post(client,'finalize',{'campaign_id':chosen['campaign_id'],'config_key':chosen['config_key']}).status_code==202
-    with app.app_context(): assert worker.process_one()
+    with app.app_context():
+        assert worker.process_one()
     models=client.get('/ia/api/results').json['models']
     assert len(models)==1 and models[0]['metrics']['n']==8
     assert post(client,'activate',{'model_id':models[0]['id']}).status_code==200
@@ -225,7 +229,8 @@ def test_pause_stop_recovery_partial_failure(app,monkeypatch):
     client=client_for(app)
     key=post(client,'campaigns',small_grid()).json['id']
     assert post(client,f'campaigns/{key}/pause').json['state']=='paused'
-    with app.app_context(): assert not worker.process_one()
+    with app.app_context():
+        assert not worker.process_one()
     assert post(client,f'campaigns/{key}/resume').json['state']=='running'
     original=learning.run_trial
     def fail_once(trial,campaign):
@@ -233,12 +238,14 @@ def test_pause_stop_recovery_partial_failure(app,monkeypatch):
         raise RuntimeError('Synthetic failure')
     monkeypatch.setattr(learning,'run_trial',fail_once)
     with app.app_context():
-        for _ in range(9): assert worker.process_one()
+        for _ in range(9):
+            assert worker.process_one()
     result=client.get('/ia/api/results').json
     assert result['campaigns'][0]['state']=='incomplete'
     assert any(not r['complete'] for r in result['results'])
     assert post(client,f'campaigns/{key}/retry').status_code==200
-    with app.app_context(): assert worker.process_one()
+    with app.app_context():
+        assert worker.process_one()
     assert client.get('/ia/api/results').json['campaigns'][0]['state']=='completed'
     other=post(client,'campaigns',small_grid()).json['id']
     assert post(client,f'campaigns/{other}/stop').json['state']=='stopped'
@@ -254,9 +261,11 @@ def test_invalid_requests_and_unavailable_account_export(app):
     with app.app_context():
         class Archive:
             def infolist(self):
-                item=zipfile.ZipInfo('Streaming_History_Audio_2024.json');item.file_size=65*1024*1024
+                item=zipfile.ZipInfo('Streaming_History_Audio_2024.json')
+                item.file_size=65*1024*1024
                 return [item]
-        with pytest.raises(ValueError): data.validate_archive(Archive())
+        with pytest.raises(ValueError):
+            data.validate_archive(Archive())
 
 
 def test_equivalent_credits_join_artist_holdouts_and_test_reuse(app):
@@ -323,7 +332,8 @@ def test_five_year_window_keeps_end_of_month_exact(app):
 def test_explicit_enrichment_queues_imported_recording_without_spotify(app):
     client=client_for(app)
     upload(client,{'Streaming_History_Audio_2024.json':[event()]})
-    with app.app_context(): assert worker.process_one()
+    with app.app_context():
+        assert worker.process_one()
     assert post(client,'enrich',{'uris':['spotify:track:one']}).status_code==202
     with app.app_context():
         assert worker.process_one()

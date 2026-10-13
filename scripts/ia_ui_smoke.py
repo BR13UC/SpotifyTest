@@ -32,7 +32,8 @@ if not already:
         storage.replace_playlist_items('alice','p',items+items[:2])
         ia_data.sync_local('alice')
         key=ia_learning.launch('alice',small_grid())
-        while ia_worker.process_one(): pass
+        while ia_worker.process_one():
+            pass
         chosen=ia_learning.results('alice')['results'][0]
         ia_learning.finalize('alice',chosen['campaign_id'],chosen['config_key'])
         ia_worker.process_one()
@@ -52,11 +53,13 @@ try:
         browser=p.chromium.launch(headless=True,**({'executable_path':os.environ['STATIFY_TEST_CHROMIUM']} if os.environ.get('STATIFY_TEST_CHROMIUM') else {}))
         for language,theme,width in [('fr','light',1440),('fr','dark',390),('en','dark',1440),('en','light',390)]:
             context=browser.new_context(viewport={'width':width,'height':1100})
-            page=context.new_page();errors=[]
+            page=context.new_page()
+            errors=[]
             page.on('pageerror',lambda error: errors.append(str(error)))
             page.goto('http://127.0.0.1:5098/__test_login')
             page.evaluate('(x)=>{localStorage.setItem("statify-lang",x[0]);localStorage.setItem("statify-theme",x[1]);}',[language,theme])
-            page.reload();page.wait_for_function('document.getElementById("ia-grid-preview").textContent.includes("88")')
+            page.reload()
+            page.wait_for_function('document.getElementById("ia-grid-preview").textContent.includes("88")')
             for tab in ['data','ratings','campaigns','results']:
                 page.locator(f'[data-tab="{tab}"]').click()
                 if tab=='ratings':
@@ -72,8 +75,10 @@ try:
                     assert page.locator('#ia-comparison details').count()>0
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'),(language,width,tab)
                 page.screenshot(path=str(ROOT/f'work/ia-{tab}-{language}-{width}.png'),full_page=True)
-            page.goto('http://127.0.0.1:5098/sorts');page.wait_for_selector('#ia-collection option',state='attached')
-            page.locator('#ia-predict').click();page.wait_for_selector('#ia-predictions article')
+            page.goto('http://127.0.0.1:5098/sorts')
+            page.wait_for_selector('#ia-collection option',state='attached')
+            page.locator('#ia-predict').click()
+            page.wait_for_selector('#ia-predictions article')
             assert page.locator('#ia-predictions section').count()==5
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             page.screenshot(path=str(ROOT/f'work/ia-playlists-{language}-{width}.png'),full_page=True)

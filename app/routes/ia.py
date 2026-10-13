@@ -133,7 +133,10 @@ def enrich():
         raise BadRequest('Titre absent du catalogue.')
     automatic = payload.get('automatic') is True
     spotify_status = 'not_requested'
-    missing = lambda item: not (any(a.get('id') for a in item.get('artists') or []) and item.get('duration_ms') and item.get('release_date'))
+
+    def missing(item):
+        return not (any(a.get('id') for a in item.get('artists') or []) and item.get('duration_ms') and item.get('release_date'))
+
     uris = list(dict.fromkeys(uris))
     if payload.get('spotify'):
         if not spotify_auth.is_valid_token():

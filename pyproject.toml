@@ -1,0 +1,12 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 200
+extend-exclude = ["work", "instance", "flask_session"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Standalone scripts add the project root to sys.path before importing the app.
+"scripts/*" = ["E402"]
+"tests/rating_session_browser.py" = ["E402"]

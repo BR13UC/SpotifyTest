@@ -72,7 +72,8 @@ def test_alias_and_duration_scoring():
     args = list(fixtures())
     args[1] = {'id': 'candidate', 'name': 'Legal name'}
     args[2] = {'aliases': [{'name': 'Artist'}]}
-    for track in args[3]: track.pop('isrc')
+    for track in args[3]:
+        track.pop('isrc')
     assert scoring.assess(*args)['score'] == 65
     args[4]['t1'][0]['length'] += 5001
     assert scoring.assess(*args)['families']['recordings'] == 15
@@ -134,7 +135,8 @@ def test_context_does_not_recount_scored_tracks():
         entries[0]['artist-credit'].append({'artist': {'id': 'friend'}})
     assert scoring.assess(*args)['families']['context'] == 0
     for track in args[3]:
-        track.pop('isrc'); track.pop('duration_ms')
+        track.pop('isrc')
+        track.pop('duration_ms')
     assert scoring.assess(*args)['families']['context'] == 5
 
 
@@ -367,8 +369,10 @@ def test_score_job_confirms_then_enriches(context, monkeypatch):
     monkeypatch.setattr(scoring, 'spotify_releases', lambda artist: spotify)
     monkeypatch.setattr(scoring, 'track_recordings', lambda track: recordings[track['spotify_id']])
     def request(path, params=None):
-        if path == 'artist': return {'artists': [candidate]}
-        if path == 'release-group': return {'release-groups': releases}
+        if path == 'artist':
+            return {'artists': [candidate]}
+        if path == 'release-group':
+            return {'release-groups': releases}
         return {'id': candidate['id'], 'name': 'Artist', 'begin-area': {'id': 'area', 'name': 'Origin'}}
     monkeypatch.setattr(mb, 'request', request)
     mb.enqueue('alice', 'artist', payload['id'], payload)

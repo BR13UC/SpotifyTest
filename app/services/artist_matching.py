@@ -238,10 +238,14 @@ def assess(payload, candidate, entity, tracks, recordings, spotify, releases, di
         evidence.append({'kind': 'identity', 'points': 100, 'label': payload.get('name'),
                          'url': next(iter(sorted(direct_urls)), f'https://open.spotify.com/artist/{payload["id"]}')})
     missing = []
-    if not tracks: missing.append('tracks')
-    if spotify is None: missing.append('spotify_catalogue')
-    if not entity.get('aliases'): missing.append('aliases')
-    if not complete: missing.append('incomplete')
+    if not tracks:
+        missing.append('tracks')
+    if spotify is None:
+        missing.append('spotify_catalogue')
+    if not entity.get('aliases'):
+        missing.append('aliases')
+    if not complete:
+        missing.append('incomplete')
     return {'id': candidate['id'], 'score': 100 if direct else min(100, sum(points.values())),
             'families': points, 'evidence': evidence, 'recording_count': len(unique),
             'direct': direct, 'complete': complete, 'conflict': bool(conflicts),

@@ -3,11 +3,10 @@ import json
 import multiprocessing
 import sqlite3
 import threading
-import time
 
 import pytest
 from app import create_app, storage
-from app.services import ia_data, ia_store, ia_worker, geography
+from app.services import ia_data, ia_store, ia_worker
 
 
 @pytest.fixture
