@@ -38,7 +38,8 @@ def archive(files):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w') as z:
         for name, rows in files.items():
-            z.writestr(name, json.dumps(rows))
+            # A fixed timestamp keeps identical archives byte-identical across calls.
+            z.writestr(zipfile.ZipInfo(name, date_time=(2024, 1, 1, 0, 0, 0)), json.dumps(rows))
     buffer.seek(0)
     return buffer
 
