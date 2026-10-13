@@ -17,6 +17,11 @@ def app(tmp_path, monkeypatch):
     return app
 
 
+@pytest.fixture
+def sklearn():
+    return pytest.importorskip('sklearn', reason='scikit-learn is required: pip install -r requirements.txt')
+
+
 def client_for(app, user='alice'):
     client = app.test_client()
     with client.session_transaction() as session:
@@ -168,7 +173,7 @@ def test_grid_counts_deduplication_and_limits(app):
     assert post(client_for(app),'campaigns',small_grid(max_configurations=1)).status_code==400
 
 
-def test_frozen_splits_and_target_features_do_not_leak(app):
+def test_frozen_splits_and_target_features_do_not_leak(app,sklearn):
     seed(app)
     with app.app_context():
         key=learning.dataset('alice')
@@ -192,7 +197,7 @@ def test_frozen_splits_and_target_features_do_not_leak(app):
         assert learning.load_dataset('alice',key)==frozen
 
 
-def test_campaign_training_finalize_activate_and_rollback(app):
+def test_campaign_training_finalize_activate_and_rollback(app,sklearn):
     seed(app)
     client=client_for(app)
     response=post(client,'campaigns',small_grid())
@@ -224,7 +229,7 @@ def test_campaign_training_finalize_activate_and_rollback(app):
     assert 'f1_macro' in client.get('/ia/api/results.csv').get_data(as_text=True)
 
 
-def test_pause_stop_recovery_partial_failure(app,monkeypatch):
+def test_pause_stop_recovery_partial_failure(app,sklearn,monkeypatch):
     seed(app)
     client=client_for(app)
     key=post(client,'campaigns',small_grid()).json['id']
@@ -268,7 +273,7 @@ def test_invalid_requests_and_unavailable_account_export(app):
             data.validate_archive(Archive())
 
 
-def test_equivalent_credits_join_artist_holdouts_and_test_reuse(app):
+def test_equivalent_credits_join_artist_holdouts_and_test_reuse(app,sklearn):
     seed(app)
     with app.app_context():
         frozen=learning.load_dataset('alice',learning.dataset('alice'))
@@ -286,7 +291,7 @@ def test_equivalent_credits_join_artist_holdouts_and_test_reuse(app):
         assert store.rows('SELECT test_used FROM ia_datasets WHERE id=?',(repeated,))[0]['test_used']==1
 
 
-def test_resume_campaign_paused_after_last_trial(app):
+def test_resume_campaign_paused_after_last_trial(app,sklearn):
     seed(app)
     client=client_for(app)
     key=post(client,'campaigns',small_grid()).json['id']
@@ -296,7 +301,7 @@ def test_resume_campaign_paused_after_last_trial(app):
     assert post(client,f'campaigns/{key}/resume').json['state']=='completed'
 
 
-def test_model_reproducibility_and_failed_save_preserves_active(app,monkeypatch):
+def test_model_reproducibility_and_failed_save_preserves_active(app,sklearn,monkeypatch):
     seed(app)
     with app.app_context():
         frozen=learning.load_dataset('alice',learning.dataset('alice'))
@@ -316,7 +321,7 @@ def test_model_reproducibility_and_failed_save_preserves_active(app,monkeypatch)
         assert not store.rows('SELECT * FROM ia_models')
 
 
-def test_five_year_window_keeps_end_of_month_exact(app):
+def test_five_year_window_keeps_end_of_month_exact(app,sklearn):
     seed(app)
     client=client_for(app)
     upload(client,{'Streaming_History_Audio_2026.json':[
