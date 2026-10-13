@@ -28,4 +28,4 @@
   </section>
 </div></div>
 {% endblock %}
-{% block scripts %}<script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>{% endblock %}
+{% block scripts %}<script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script><script src="{{ url_for('static', filename='graphs.js') }}"></script>{% endblock %}

@@ -35,7 +35,7 @@
     <div id="detail-content" class="detail-content"></div>
   </aside>
   <script src="{{ url_for('static', filename='ui.js') }}"></script>
-  <script src="{{ url_for('static', filename='script.js') }}"></script>
+  <script src="{{ url_for('static', filename='common.js') }}"></script>
   {% if active_page in ['graphs', 'map', 'timeline'] %}<script src="{{ url_for('static', filename='artist_source.js') }}"></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>

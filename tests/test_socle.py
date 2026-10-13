@@ -384,7 +384,7 @@ def test_graph_genre_taxonomy_cooccurrence_and_clusters(app):
 def test_graph_node_sizes():
     if not shutil.which("node"):
         pytest.skip("Node.js absent")
-    script = Path(__file__).resolve().parents[1] / "app/static/script.js"
+    static = Path(__file__).resolve().parents[1] / "app/static"
     result = subprocess.run(["node", "-e", """
         const fs = require('fs');
         const vm = require('vm');
@@ -403,7 +403,7 @@ def test_graph_node_sizes():
             document: { querySelector: () => null, addEventListener: () => {}, getElementById: () => ({}) },
             window: { vis, setTimeout: (_fn, delay) => delay, clearTimeout: () => {} }, vis,
         };
-        vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8') + '; globalThis.page = GraphPage;', context);
+        vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8') + '\\n' + fs.readFileSync(process.argv[2], 'utf8') + '; globalThis.page = GraphPage;', context);
         const page = context.page;
         page.maxGenreCount = 9;
         page.maxLikedCount = 100;
@@ -479,7 +479,7 @@ def test_graph_node_sizes():
         process.stdout.write(JSON.stringify({ sizes, nodes: page.nodeSet.data, positions: basePositions,
             repeat: [...page.layoutPositions(layoutNodes, layoutEdges)], options, timeout, calls: page.network.calls,
             denseMinimum, labels, weightedLayout }));
-    """, str(script)], check=True, capture_output=True, text=True)
+    """, str(static / "common.js"), str(static / "graphs.js")], check=True, capture_output=True, text=True)
     rendered = json.loads(result.stdout)
     zero, few, many, small_genre, large_genre, unavailable = rendered["sizes"]
     assert zero == 10
