@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app import storage
-from app.services import artist_sources, musicbrainz
+from app.services import artist_sources, mb_client
 
 
 COUNTRIES_PATH = Path(__file__).resolve().parents[1] / "static" / "world-countries.geojson"
@@ -83,7 +83,7 @@ def _wikidata(qid):
         return {}
     query = urlencode({"action": "wbgetentities", "ids": qid, "props": "claims", "format": "json"})
     request = Request(f"https://www.wikidata.org/w/api.php?{query}", headers={
-        "User-Agent": musicbrainz.USER_AGENT, "Accept": "application/json"})
+        "User-Agent": mb_client.USER_AGENT, "Accept": "application/json"})
     with urlopen(request, timeout=8) as response:
         return json.load(response).get("entities", {}).get(qid, {})
 
@@ -102,7 +102,7 @@ def _claim(entity, property_id, current=False, allow_deprecated=False):
 
 
 def _resolve(area_id):
-    area = musicbrainz.request(f"area/{area_id}", {"inc": "url-rels"})
+    area = mb_client.request(f"area/{area_id}", {"inc": "url-rels"})
     code = next(iter(area.get("iso-3166-1-codes") or []), None)
     if not code:
         code = next((value.split("-", 1)[0] for value in area.get("iso-3166-2-codes") or []
@@ -143,7 +143,7 @@ def process_area_one():
         return False
     try:
         lat, lon, code, area_type = _resolve(row["area_id"])
-    except (musicbrainz.TemporaryFailure, HTTPError, URLError, TimeoutError, OSError, ValueError, KeyError):
+    except (mb_client.TemporaryFailure, HTTPError, URLError, TimeoutError, OSError, ValueError, KeyError):
         delay = min(3600, 2 ** min(row["attempts"] + 1, 10))
         available = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
         with storage.connect() as db:

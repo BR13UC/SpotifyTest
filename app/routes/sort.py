@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, session
 from app.services.playlist_data import SORT_FIELDS, get_items_for_user, sort_items
-from app.services import musicbrainz
+from app.services import mb_queue
 from app import storage
 
 sort_bp = Blueprint("sort", __name__)
@@ -29,5 +29,5 @@ def sort_playlist_tracks():
         return jsonify(error="Option de tri inconnue."), 400
     user_id = session["spotify_user_id"]
     spotify_genres = {artist["id"]: artist.get("genres") or [] for artist in storage.get_followed_artists(user_id)}
-    return jsonify(tracks=[{**item, "musicbrainz": musicbrainz.track_enrichment(user_id, item, spotify_genres)} for item in ordered],
+    return jsonify(tracks=[{**item, "musicbrainz": mb_queue.track_enrichment(user_id, item, spotify_genres)} for item in ordered],
                    skipped_count=sum(not item["exportable"] for item in ordered))

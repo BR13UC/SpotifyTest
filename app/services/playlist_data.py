@@ -1,6 +1,7 @@
 """Spotify playlist loading, normalization and sorting."""
 
 from app import spotify_auth, storage
+from app.services import mb_queue
 
 
 SORT_FIELDS = {
@@ -72,9 +73,8 @@ def get_items_for_user(user_id, playlist_id, enqueue=True):
     metadata, updated_at = storage.get_cache(user_id, "playlist_items", playlist_id)
     if metadata is not None and not storage.is_stale(updated_at):
         items = storage.get_playlist_items(user_id, playlist_id)
-        from app.services.musicbrainz import enqueue_playlist
         if enqueue:
-            enqueue_playlist(user_id, items)
+            mb_queue.enqueue_playlist(user_id, items)
         return items
     spotify = spotify_auth.get_spotify()
     items = []
@@ -87,9 +87,8 @@ def get_items_for_user(user_id, playlist_id, enqueue=True):
             break
         offset += len(entries)
     storage.replace_playlist_items(user_id, playlist_id, items)
-    from app.services.musicbrainz import enqueue_playlist
     if enqueue:
-        enqueue_playlist(user_id, items)
+        mb_queue.enqueue_playlist(user_id, items)
     return items
 
 

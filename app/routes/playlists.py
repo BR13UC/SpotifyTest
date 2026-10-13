@@ -3,7 +3,7 @@ from spotipy.exceptions import SpotifyException
 
 from app import spotify_auth
 from app.services.playlist_data import get_items_for_user, get_playlists_for_user, sort_items
-from app.services import musicbrainz
+from app.services import mb_queue
 from app import storage
 
 playlist_bp = Blueprint("playlist", __name__)
@@ -26,7 +26,7 @@ def get_playlist_tracks():
         return jsonify(error="Playlist introuvable dans votre bibliothèque."), 404
     spotify_genres = {artist["id"]: artist.get("genres") or [] for artist in storage.get_followed_artists(session["spotify_user_id"])}
     return jsonify(total=len(items), tracks=[{
-        **item, "musicbrainz": musicbrainz.track_enrichment(session["spotify_user_id"], item, spotify_genres)
+        **item, "musicbrainz": mb_queue.track_enrichment(session["spotify_user_id"], item, spotify_genres)
     } for item in items])
 
 

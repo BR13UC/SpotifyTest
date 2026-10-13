@@ -7,7 +7,7 @@ from flask import Flask
 from spotipy.exceptions import SpotifyException
 
 from app import storage
-from app.services import artist_matching as scoring, artist_sites, musicbrainz as mb
+from app.services import artist_matching as scoring, artist_sites, mb_client, mb_queue, spotify_catalogue
 
 
 @pytest.fixture
@@ -114,8 +114,8 @@ def test_deluxe_and_remaster_releases_do_not_inflate_discography():
 
 
 def test_empty_pagination_page_is_partial(monkeypatch):
-    monkeypatch.setattr(mb, 'request', lambda *args: {'recording-count': 10, 'recordings': []})
-    with pytest.raises(mb.TemporaryFailure, match='incomplete'):
+    monkeypatch.setattr(mb_client, 'request', lambda *args: {'recording-count': 10, 'recordings': []})
+    with pytest.raises(mb_client.TemporaryFailure, match='incomplete'):
         scoring.browse('recording', {}, 'recordings')
 
 
@@ -154,7 +154,7 @@ def test_musicbrainz_and_spotify_pagination(context, monkeypatch):
         calls.append(params['offset'])
         offset = params['offset']
         return {'release-group-count': 101, 'release-groups': [{'id': str(i)} for i in range(offset, min(101, offset + 100))]}
-    monkeypatch.setattr(mb, 'request', request)
+    monkeypatch.setattr(mb_client, 'request', request)
     assert len(scoring.browse('release-group', {}, 'release-groups')) == 101
     assert calls == [0, 100]
     context.config.update(SPOTIPY_CLIENT_ID='test', SPOTIPY_CLIENT_SECRET='test')
@@ -162,9 +162,9 @@ def test_musicbrainz_and_spotify_pagination(context, monkeypatch):
         def artist_albums(self, artist, **params):
             assert params['album_type'] == 'album,single,appears_on'
             return {'items': [{'id': str(params['offset']), 'name': 'EP'}], 'next': 'next' if params['offset'] == 0 else None}
-    monkeypatch.setattr(mb, '_spotify_catalogue_client', lambda: Client())
+    monkeypatch.setattr(spotify_catalogue, '_spotify_catalogue_client', lambda: Client())
     assert len(scoring.spotify_releases('spotify')) == 2
-    monkeypatch.setattr(mb, '_spotify_catalogue_client', lambda: pytest.fail('Should reuse cache'))
+    monkeypatch.setattr(spotify_catalogue, '_spotify_catalogue_client', lambda: pytest.fail('Should reuse cache'))
     assert len(scoring.spotify_releases('spotify')) == 2
 
 
@@ -183,15 +183,15 @@ def test_spotify_catalogue_renews_token_once_after_401(context, monkeypatch):
                 self.failures -= 1
                 raise SpotifyException(401, -1, 'The access token expired')
             return {'items': [{'id': 'album', 'name': 'EP'}], 'next': None}
-    monkeypatch.setattr(mb, '_spotify_catalogue_client', lambda: Client(1))
+    monkeypatch.setattr(spotify_catalogue, '_spotify_catalogue_client', lambda: Client(1))
     assert len(scoring.spotify_releases('renewed')) == 1
     assert renewals == [False]
-    monkeypatch.setattr(mb, '_spotify_catalogue_client', lambda: Client(2))
+    monkeypatch.setattr(spotify_catalogue, '_spotify_catalogue_client', lambda: Client(2))
     with pytest.raises(SpotifyException):
         scoring.spotify_releases('still-refused')
     assert renewals == [False, False]
-    monkeypatch.setattr(mb, '_spotify_catalogue_client', lambda: Client(1))
-    assert mb._spotify_albums('compared') == ['EP']
+    monkeypatch.setattr(spotify_catalogue, '_spotify_catalogue_client', lambda: Client(1))
+    assert spotify_catalogue._spotify_albums('compared') == ['EP']
     assert renewals == [False, False, False]
 
 
@@ -252,23 +252,23 @@ def test_official_url_blocks_nonpublic_network(monkeypatch):
 
 
 def test_direct_candidate_outside_name_search_and_partial_retry(context, monkeypatch):
-    monkeypatch.setattr(mb, 'request', lambda path, params=None: {'id': path.split('/')[-1], 'name': 'Legal name'} if path.startswith('artist/') else {})
+    monkeypatch.setattr(mb_client, 'request', lambda path, params=None: {'id': path.split('/')[-1], 'name': 'Legal name'} if path.startswith('artist/') else {})
     monkeypatch.setattr(scoring, 'spotify_releases', lambda artist: [])
-    mb.enqueue('alice', 'artist', 'spotify', {'id': 'spotify', 'name': 'Alias'})
+    mb_queue.enqueue('alice', 'artist', 'spotify', {'id': 'spotify', 'name': 'Alias'})
     with storage.connect() as db:
         job = dict(db.execute('SELECT * FROM mb_jobs').fetchone())
-    mb._process_job(job, {'spotify': {'candidate'}})
-    match = mb.get_match('alice', 'artist', 'spotify')
+    mb_queue._process_job(job, {'spotify': {'candidate'}})
+    match = mb_queue.get_match('alice', 'artist', 'spotify')
     assert match['mbid'] == 'candidate'
     assert match['match_evidence']['ranked'][0]['score'] == 100
-    mb.enqueue('alice', 'artist', 'partial', {'id': 'partial', 'name': 'Alias'})
+    mb_queue.enqueue('alice', 'artist', 'partial', {'id': 'partial', 'name': 'Alias'})
     with storage.connect() as db:
         db.execute("UPDATE mb_matches SET candidates=? WHERE spotify_id='partial'", (json.dumps([{'id': 'candidate', 'name': 'Alias'}]),))
         job = dict(db.execute("SELECT * FROM mb_jobs WHERE spotify_id='partial'").fetchone())
     monkeypatch.setattr(artist_sites, 'identity_links', lambda entity, spotify_id: (
         [], [{'kind': 'site_unavailable', 'url': 'https://slow.example/', 'temporary': True}], [], False))
-    mb._process_job(job, {'partial': set()})
-    match = mb.get_match('alice', 'artist', 'partial')
+    mb_queue._process_job(job, {'partial': set()})
+    match = mb_queue.get_match('alice', 'artist', 'partial')
     assert match['status'] == 'ambiguous'
     assert match['match_evidence']['ranked'][0]['complete'] is False
     with storage.connect() as db:
@@ -280,40 +280,40 @@ def test_unique_direct_link_skips_homonyms_tracks_and_discographies(context, mon
     def request(path, params=None):
         calls.append(path)
         return {'id': path.split('/')[-1], 'name': 'Artist'} if path.startswith('artist/') else pytest.fail(path)
-    monkeypatch.setattr(mb, 'request', request)
+    monkeypatch.setattr(mb_client, 'request', request)
     monkeypatch.setattr(scoring, 'spotify_releases', lambda artist: pytest.fail('catalogue'))
     monkeypatch.setattr(scoring, 'track_recordings', lambda track: pytest.fail('recordings'))
     payload, _, _, tracks, *_ = fixtures()
     storage.set_cache('alice', 'liked_collection', {'tracks': tracks})
-    mb.enqueue('alice', 'artist', 'spotify', payload)
+    mb_queue.enqueue('alice', 'artist', 'spotify', payload)
     with storage.connect() as db:
         db.execute("UPDATE mb_matches SET candidates=?", (json.dumps([{'id': 'homonym', 'name': 'Artist'}]),))
         job = dict(db.execute('SELECT * FROM mb_jobs').fetchone())
-    mb._process_job(job, {'spotify': {'candidate'}})
-    match = mb.get_match('alice', 'artist', 'spotify')
+    mb_queue._process_job(job, {'spotify': {'candidate'}})
+    match = mb_queue.get_match('alice', 'artist', 'spotify')
     assert (match['status'], match['mbid'], match['match_method']) == ('confirmed', 'candidate', 'spotify_url')
     assert [item['id'] for item in match['match_evidence']['ranked']] == ['candidate']
     assert set(calls) == {'artist/candidate'}
 
 
 def test_unreachable_own_site_does_not_block_a_unique_direct_link(context, monkeypatch):
-    monkeypatch.setattr(mb, 'request', lambda path, params=None: {'id': path.split('/')[-1], 'name': 'Artist'})
+    monkeypatch.setattr(mb_client, 'request', lambda path, params=None: {'id': path.split('/')[-1], 'name': 'Artist'})
     monkeypatch.setattr(artist_sites, 'identity_links', lambda entity, spotify_id: (
         [], [{'kind': 'site_unavailable', 'url': 'https://own.example/', 'temporary': True}], [], False))
-    mb.enqueue('alice', 'artist', 'spotify', {'id': 'spotify', 'name': 'Artist'})
+    mb_queue.enqueue('alice', 'artist', 'spotify', {'id': 'spotify', 'name': 'Artist'})
     with storage.connect() as db:
         job = dict(db.execute('SELECT * FROM mb_jobs').fetchone())
-    mb._process_job(job, {'spotify': {'candidate'}})
-    match = mb.get_match('alice', 'artist', 'spotify')
+    mb_queue._process_job(job, {'spotify': {'candidate'}})
+    match = mb_queue.get_match('alice', 'artist', 'spotify')
     assert (match['status'], match['mbid']) == ('confirmed', 'candidate')
     assert match['match_evidence']['errors'] == ['Official website unavailable: https://own.example/']
     monkeypatch.setattr(artist_sites, 'identity_links', lambda entity, spotify_id: (
         [], [], [{'kind': 'official_other_identity', 'url': 'https://own.example/'}], True))
-    mb.enqueue('alice', 'artist', 'conflict', {'id': 'conflict', 'name': 'Artist'})
+    mb_queue.enqueue('alice', 'artist', 'conflict', {'id': 'conflict', 'name': 'Artist'})
     with storage.connect() as db:
         job = dict(db.execute("SELECT * FROM mb_jobs WHERE spotify_id='conflict'").fetchone())
-    mb._process_job(job, {'conflict': {'candidate'}})
-    assert mb.get_match('alice', 'artist', 'conflict')['status'] == 'ambiguous'
+    mb_queue._process_job(job, {'conflict': {'candidate'}})
+    assert mb_queue.get_match('alice', 'artist', 'conflict')['status'] == 'ambiguous'
 
 
 def test_site_failing_for_more_than_a_day_is_treated_as_gone(context, monkeypatch):
@@ -341,13 +341,13 @@ def test_several_direct_links_keep_the_full_analysis(context, monkeypatch):
     def request(path, params=None):
         calls.append(path)
         return {'id': path.split('/')[-1], 'name': 'Artist'} if path.startswith('artist/') else {}
-    monkeypatch.setattr(mb, 'request', request)
+    monkeypatch.setattr(mb_client, 'request', request)
     monkeypatch.setattr(scoring, 'spotify_releases', lambda artist: [])
-    mb.enqueue('alice', 'artist', 'spotify', {'id': 'spotify', 'name': 'Artist'})
+    mb_queue.enqueue('alice', 'artist', 'spotify', {'id': 'spotify', 'name': 'Artist'})
     with storage.connect() as db:
         job = dict(db.execute('SELECT * FROM mb_jobs').fetchone())
-    mb._process_job(job, {'spotify': {'first', 'second'}})
-    match = mb.get_match('alice', 'artist', 'spotify')
+    mb_queue._process_job(job, {'spotify': {'first', 'second'}})
+    match = mb_queue.get_match('alice', 'artist', 'spotify')
     assert match['status'] == 'ambiguous'
     assert {'artist', 'release-group'} <= set(calls)
 
@@ -374,27 +374,27 @@ def test_score_job_confirms_then_enriches(context, monkeypatch):
         if path == 'release-group':
             return {'release-groups': releases}
         return {'id': candidate['id'], 'name': 'Artist', 'begin-area': {'id': 'area', 'name': 'Origin'}}
-    monkeypatch.setattr(mb, 'request', request)
-    mb.enqueue('alice', 'artist', payload['id'], payload)
+    monkeypatch.setattr(mb_client, 'request', request)
+    mb_queue.enqueue('alice', 'artist', payload['id'], payload)
     with storage.connect() as db:
         job = dict(db.execute('SELECT * FROM mb_jobs').fetchone())
-    mb._process_job(job, {'spotify': set()})
-    result = mb.get_match('alice', 'artist', 'spotify')
+    mb_queue._process_job(job, {'spotify': set()})
+    result = mb_queue.get_match('alice', 'artist', 'spotify')
     assert result['status'] == 'confirmed'
     assert result['match_method'] == 'score'
     assert result['match_evidence']['ranked'][0]['score'] == 95
     assert result['enriched']['origin']['name'] == 'Origin'
-    assert mb.progress_for('alice', 'artist')['completed'] == 1
+    assert mb_queue.progress_for('alice', 'artist')['completed'] == 1
 
 
 def test_active_score_progress_is_account_scoped(context):
     for user in ['alice', 'bob']:
-        mb.enqueue(user, 'artist', 'spotify', {'name': user})
+        mb_queue.enqueue(user, 'artist', 'spotify', {'name': user})
     with storage.connect() as db:
         db.execute("UPDATE mb_jobs SET state='processing',claimed_at=?", (storage.now(),))
     storage.set_cache('alice', 'artist_score_progress', {'name': 'Artist', 'phase': 'candidates', 'done': 3, 'total': 10}, 'spotify')
-    assert mb.progress_for('alice', 'artist')['analysis']['done'] == 3
-    assert 'analysis' not in mb.progress_for('bob', 'artist')
+    assert mb_queue.progress_for('alice', 'artist')['analysis']['done'] == 3
+    assert 'analysis' not in mb_queue.progress_for('bob', 'artist')
     with storage.connect() as db:
         db.execute("UPDATE mb_jobs SET state='queued' WHERE user_id='alice'")
-    assert 'analysis' not in mb.progress_for('alice', 'artist')
+    assert 'analysis' not in mb_queue.progress_for('alice', 'artist')

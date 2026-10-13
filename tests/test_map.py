@@ -6,7 +6,7 @@ import pytest
 
 from app import create_app, spotify_auth, storage
 from app.routes import pages
-from app.services import geography, musicbrainz
+from app.services import geography, mb_client, mb_queue, recording_matching
 
 
 PARIS = "11111111-1111-1111-1111-111111111111"
@@ -34,17 +34,17 @@ def test_existing_geography_table_gets_resolver_version(tmp_path):
 
 
 def test_artist_current_country_does_not_become_origin_country(monkeypatch):
-    monkeypatch.setattr(musicbrainz, "request", lambda *_: {
+    monkeypatch.setattr(mb_client, "request", lambda *_: {
         "id": PARIS, "name": "Artist", "type": "Person", "country": "GB",
         "begin-area": {"id": LONDON, "name": "Cape Town"},
     })
-    details = musicbrainz._details("artist", PARIS)
+    details = mb_client._details("artist", PARIS)
     assert details["country_code"] == "GB"
     assert details["origin"]["country_code"] is None
 
 
 def test_non_city_area_can_still_resolve_its_country(monkeypatch):
-    monkeypatch.setattr(geography.musicbrainz, "request", lambda *_: {
+    monkeypatch.setattr(geography.mb_client, "request", lambda *_: {
         "type": "Subdivision", "relations": [
             {"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Q1"}},
         ],
@@ -65,7 +65,7 @@ def test_historical_country_does_not_hide_current_country():
 
 
 def test_deprecated_country_code_can_be_used_for_current_country(monkeypatch):
-    monkeypatch.setattr(geography.musicbrainz, "request", lambda *_: {
+    monkeypatch.setattr(geography.mb_client, "request", lambda *_: {
         "type": "City", "relations": [
             {"type": "wikidata", "url": {"resource": "https://www.wikidata.org/wiki/Q727"}},
         ],
@@ -82,7 +82,7 @@ def test_deprecated_country_code_can_be_used_for_current_country(monkeypatch):
 
 
 def test_area_iso_3166_2_supplies_country(monkeypatch):
-    monkeypatch.setattr(geography.musicbrainz, "request", lambda *_: {
+    monkeypatch.setattr(geography.mb_client, "request", lambda *_: {
         "type": "City", "iso-3166-2-codes": ["RU-MOW"], "relations": [],
     })
     assert geography._resolve(PARIS) == (None, None, "RU", "City")
@@ -124,7 +124,7 @@ def test_city_resolution_and_country_fallback(app, monkeypatch):
                                "P17": [{"mainsnak": {"datavalue": {"value": {"id": "Q142"}}}}]}}
         return {"claims": {"P297": [{"mainsnak": {"datavalue": {"value": "FR"}}}]}}
 
-    monkeypatch.setattr(geography.musicbrainz, "request", musicbrainz_request)
+    monkeypatch.setattr(geography.mb_client, "request", musicbrainz_request)
     monkeypatch.setattr(geography, "_wikidata", wikidata)
     with app.app_context():
         add_artist("alice", "paris", origin={"external_id": PARIS, "name": "Paris", "type": "birth", "source": "musicbrainz"}, country="NO")
@@ -169,7 +169,7 @@ def test_map_api_requires_account(app, monkeypatch):
 
 
 def test_unlocated_area_keeps_confirmed_country_and_is_cached(app, monkeypatch):
-    monkeypatch.setattr(geography.musicbrainz, "request", lambda *_: {"type": "City", "iso-3166-1-codes": ["FR"], "relations": []})
+    monkeypatch.setattr(geography.mb_client, "request", lambda *_: {"type": "City", "iso-3166-1-codes": ["FR"], "relations": []})
     with app.app_context():
         add_artist("alice", "artist", origin={"external_id": PARIS, "name": "Ville", "type": "formation"})
     client = app.test_client()
@@ -331,12 +331,12 @@ def test_country_only_artist_rechecks_after_thirty_days_per_account(app, monkeyp
     with app.app_context():
         with storage.connect() as db:
             assert db.execute("SELECT COUNT(*) FROM mb_jobs").fetchone()[0] == 1
-        monkeypatch.setattr(musicbrainz, "_direct_links", lambda artist_ids: {})
-        monkeypatch.setattr(musicbrainz, "_details", lambda kind, mbid: {
+        monkeypatch.setattr(recording_matching, "_direct_links", lambda artist_ids: {})
+        monkeypatch.setattr(mb_client, "_details", lambda kind, mbid: {
             "name": "Old", "country_code": "FR",
             "origin": {"external_id": PARIS, "name": "Paris", "type": "birth", "source": "musicbrainz"},
         })
-        assert musicbrainz.process_one()
+        assert mb_queue.process_one()
         with storage.connect() as db:
             assert db.execute("SELECT COUNT(*) FROM mb_jobs").fetchone()[0] == 0
     login(client, "alice")

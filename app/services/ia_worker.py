@@ -6,7 +6,7 @@ from pathlib import Path
 
 from flask import current_app
 from app import create_app, storage
-from app.services import ia_data as data, ia_learning as learning, ia_store as store
+from app.services import ia_data as data, ia_learning as learning, ia_store as store, mb_queue, spotify_catalogue
 
 
 def recover():
@@ -17,7 +17,6 @@ def recover():
 
 
 def enrich(job):
-    from app.services import musicbrainz
     payload = json.loads(job['payload'])
     # User-session refresh happens in the authenticated request. A deliberate
     # catalogue backfill uses the existing public catalogue client instead.
@@ -29,7 +28,7 @@ def enrich(job):
             any(a.get('id') for a in item.get('artists') or []) and
             item.get('duration_ms') and item.get('release_date'))]
         if missing:
-            client = musicbrainz._spotify_catalogue_client()
+            client = spotify_catalogue._spotify_catalogue_client()
             for offset in range(0, len(missing), 50):
                 tracks = client.tracks([item['spotify_id'] for item in missing[offset:offset + 50]])['tracks']
                 with storage.connect() as db:
@@ -37,7 +36,7 @@ def enrich(job):
                         if track and track.get('uri') in uris:
                             store.upsert_track(db, job['user_id'], normalize_item({'track': track}, 0))
             items = [r for r in store.tracks(job['user_id']) if r['uri'] in uris]
-    musicbrainz.enqueue_playlist(job['user_id'], items)
+    mb_queue.enqueue_playlist(job['user_id'], items)
 
 
 def process_one():

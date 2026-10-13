@@ -10,6 +10,7 @@ from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
 from app import storage
+from app.services import mb_client
 
 
 # A site still failing "temporarily" after this long is treated as gone until the negative cache expires.
@@ -49,7 +50,6 @@ class UnavailableSite(ValueError):
 
 def fetch_links(url):
     """Pin each connection to a checked public IP, including redirect targets."""
-    from app.services import musicbrainz as mb
     for _ in range(5):
         parsed = urlsplit(url)
         if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
@@ -74,7 +74,7 @@ def fetch_links(url):
         try:
             try:
                 connection.request('GET', parsed.path + ('?' + parsed.query if parsed.query else '') or '/',
-                                   headers={'User-Agent': mb.USER_AGENT, 'Accept': 'text/html'})
+                                   headers={'User-Agent': mb_client.USER_AGENT, 'Accept': 'text/html'})
                 response = connection.getresponse()
             except ssl.SSLCertVerificationError as error:
                 raise UnavailableSite('Official website certificate is invalid') from error
@@ -99,14 +99,13 @@ def fetch_links(url):
 
 
 def cached_links(url):
-    from app.services import musicbrainz as mb
     key = f'artist-score-site:{url}'
     with storage.connect() as db:
         row = db.execute('SELECT payload,updated_at FROM mb_http_cache WHERE cache_key=?', (key,)).fetchone()
     cached = json.loads(row['payload']) if row else None
-    if isinstance(cached, list) and not storage.is_stale(row['updated_at'], mb.CACHE_AGE):
+    if isinstance(cached, list) and not storage.is_stale(row['updated_at'], mb_client.CACHE_AGE):
         return cached
-    if isinstance(cached, dict) and 'unavailable' in cached and not storage.is_stale(row['updated_at'], mb.NEGATIVE_CACHE_AGE):
+    if isinstance(cached, dict) and 'unavailable' in cached and not storage.is_stale(row['updated_at'], mb_client.NEGATIVE_CACHE_AGE):
         raise UnavailableSite(cached['unavailable'])
     def store(payload):
         with storage.connect() as db:

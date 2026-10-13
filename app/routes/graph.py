@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request, send_file, session
 from spotipy.exceptions import SpotifyException
 
 from app import storage
-from app.services import artist_sources, genre_colors, liked_tracks, musicbrainz
+from app.services import artist_sources, genre_colors, liked_tracks, mb_client, mb_queue
 from app.services.playlist_data import get_items_for_user
 
 graph_bp = Blueprint("graph", __name__)
@@ -69,7 +69,7 @@ def graph_records(user_id, include_match=False, source="followed", playlist_id=N
         return None
     return [(artist,
              json.loads(row["enriched"]) if row and row["enriched"] else None,
-             musicbrainz._row_dict(row) if include_match and row else None,
+             mb_queue._row_dict(row) if include_match and row else None,
              row["updated_at"] if row else None) for artist, row in records]
 
 
@@ -88,8 +88,8 @@ def build_graph(user_id, include_match=False, source="followed", playlist_id=Non
         spotify_genres = [{"name": genre, "source": "spotify", "level": "artist", "external_id": artist["id"]}
                           for genre in artist.get("genres") or []]
         mb_genres = enriched or {}
-        for genre in musicbrainz.merged_genres(spotify_genres, mb_genres.get("genres") or []):
-            genre_id = f"genre:{musicbrainz._fold(genre['name'])}"
+        for genre in mb_queue.merged_genres(spotify_genres, mb_genres.get("genres") or []):
+            genre_id = f"genre:{mb_client._fold(genre['name'])}"
             graph.add_node(genre_id, label=genre["name"], group="genre")
             graph.add_edge(artist_id, genre_id, origins=json.dumps(genre["origins"], ensure_ascii=False))
     return graph, revision
@@ -205,7 +205,7 @@ def artist_details(spotify_id):
     with storage.connect() as db:
         row = db.execute("SELECT * FROM mb_matches WHERE user_id=? AND kind='artist' AND spotify_id=?",
                          (user_id, spotify_id)).fetchone()
-    return jsonify(match=musicbrainz._row_dict(row) if row else None)
+    return jsonify(match=mb_queue._row_dict(row) if row else None)
 
 
 @graph_bp.get("/export_graph/<format>")

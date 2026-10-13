@@ -6,7 +6,7 @@ from flask import request
 from werkzeug.exceptions import BadRequest, NotFound
 
 from app import spotify_auth, storage
-from app.services import liked_tracks, musicbrainz
+from app.services import liked_tracks, mb_queue
 from app.services.playlist_data import get_items_for_user
 
 
@@ -62,7 +62,7 @@ def collection(user_id, source="followed", playlist_id=None, load=False):
         artists = [profiles.get(artist_id, artist) for artist_id, artist in artists_by_id.items()]
     artists = sorted(artists, key=lambda artist: artist["id"])
     if load:
-        musicbrainz.enqueue_followed(user_id, artists)
+        mb_queue.enqueue_followed(user_id, artists)
     return artists
 
 

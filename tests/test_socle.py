@@ -508,16 +508,16 @@ def test_graph_node_sizes():
 
 
 def test_graph_batch_matches_and_account_scoped_details(app, monkeypatch):
-    from app.services import musicbrainz
+    from app.services import mb_queue
 
     with app.app_context():
         storage.replace_followed_artists("alice", [{"id": "one", "name": "Alice", "genres": ["rock"]}])
         storage.replace_followed_artists("bob", [{"id": "two", "name": "Bob", "genres": ["jazz"]}])
-        musicbrainz.enqueue("alice", "artist", "one", {"id": "one", "name": "Alice"})
+        mb_queue.enqueue("alice", "artist", "one", {"id": "one", "name": "Alice"})
         with storage.connect() as db:
             db.execute("UPDATE mb_matches SET status='confirmed', enriched=?, updated_at=? WHERE user_id='alice'",
                        ('{"genres":[{"name":"indie","source":"musicbrainz","level":"artist"}]}', storage.now()))
-    monkeypatch.setattr(musicbrainz, "get_match", lambda *_: pytest.fail("N+1 graph lookup"))
+    monkeypatch.setattr(mb_queue, "get_match",lambda *_: pytest.fail("N+1 graph lookup"))
     client = app.test_client()
     login(client)
     response = client.get("/graphs/get_artist_genre_graph_data")

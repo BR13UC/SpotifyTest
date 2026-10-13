@@ -9,7 +9,7 @@ from flask import session
 from app import create_app, spotify_auth
 from app import storage
 from app.routes import pages
-from app.services import musicbrainz as mb
+from app.services import mb_client, mb_queue, recording_matching, spotify_catalogue
 
 
 @pytest.fixture
@@ -37,21 +37,21 @@ def test_isrc_match_genres_origin_and_account_isolation(app, monkeypatch):
         return {"id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "title": "Song", "first-release-date": "2020-01-01",
                 "genres": [{"name": "Rock"}]}
 
-    monkeypatch.setattr(mb, "request", fake_request)
+    monkeypatch.setattr(mb_client, "request", fake_request)
     item = {"type": "track", "exportable": True, "name": "Song", "spotify_id": "track1", "isrc": "USAAA1234567",
             "duration_ms": 100000, "artists": [{"id": "artist1", "name": "Artist"}]}
     with app.app_context():
-        mb.enqueue_playlist("alice", [item])
+        mb_queue.enqueue_playlist("alice", [item])
         # Process the recording first to avoid involving artist search in this assertion.
         from app import storage
         with storage.connect() as db:
             db.execute("DELETE FROM mb_jobs WHERE kind='artist'")
-        assert mb.process_one()
-        match = mb.get_match("alice", "recording", "track1")
+        assert mb_queue.process_one()
+        match = mb_queue.get_match("alice", "recording", "track1")
         assert match["status"] == "confirmed"
         assert match["enriched"]["first_release_date"] == "2020-01-01"
-        assert mb.get_match("bob", "recording", "track1") is None
-        merged = mb.merged_genres(
+        assert mb_queue.get_match("bob", "recording", "track1") is None
+        merged = mb_queue.merged_genres(
             [{"name": "rock", "source": "spotify", "level": "artist", "external_id": "artist1"}],
             match["enriched"]["genres"],
         )
@@ -73,13 +73,13 @@ def test_homonyms_manual_override_and_csrf(app, monkeypatch):
         return {"id": path.split("/")[-1], "name": "Même nom", "type": "Person",
                 "begin-area": {"id": "area-1", "name": "Paris"}, "genres": []}
 
-    monkeypatch.setattr(mb, "request", fake_request)
+    monkeypatch.setattr(mb_client, "request", fake_request)
     with app.app_context():
-        mb.enqueue("alice", "artist", "spotify-one", {"name": "Même nom"})
-        mb.enqueue("bob", "artist", "spotify-one", {"name": "Même nom"})
-        mb.process_one()
-        mb.process_one()
-        assert mb.get_match("alice", "artist", "spotify-one")["status"] == "ambiguous"
+        mb_queue.enqueue("alice", "artist", "spotify-one", {"name": "Même nom"})
+        mb_queue.enqueue("bob", "artist", "spotify-one", {"name": "Même nom"})
+        mb_queue.process_one()
+        mb_queue.process_one()
+        assert mb_queue.get_match("alice", "artist", "spotify-one")["status"] == "ambiguous"
     client = app.test_client()
     login(client, "alice")
     url = "/musicbrainz/match/artist/spotify-one"
@@ -87,17 +87,17 @@ def test_homonyms_manual_override_and_csrf(app, monkeypatch):
     response = client.post(url, json={"mbid": candidates[0]["id"]}, headers={"X-CSRF-Token": "test-csrf"})
     assert response.status_code == 200
     with app.app_context():
-        assert mb.get_match("bob", "artist", "spotify-one")["status"] == "ambiguous"
-        mb.process_one()
-        match = mb.get_match("alice", "artist", "spotify-one")
+        assert mb_queue.get_match("bob", "artist", "spotify-one")["status"] == "ambiguous"
+        mb_queue.process_one()
+        match = mb_queue.get_match("alice", "artist", "spotify-one")
         assert match["enriched"]["origin"]["name"] == "Paris"
-        assert mb.status_for("alice")["artists_with_origin"] == 1
-        assert mb.get_match("alice", "artist", "spotify-one")["mbid"] == candidates[0]["id"]
+        assert mb_queue.status_for("alice")["artists_with_origin"] == 1
+        assert mb_queue.get_match("alice", "artist", "spotify-one")["mbid"] == candidates[0]["id"]
     corrected = client.post(url, json={"mbid": candidates[1]["id"]}, headers={"X-CSRF-Token": "test-csrf"})
     assert corrected.json["mbid"] == candidates[1]["id"]
     with app.app_context():
-        mb.process_one()
-        assert mb.get_match("alice", "artist", "spotify-one")["enriched"]["external_id"] == candidates[1]["id"]
+        mb_queue.process_one()
+        assert mb_queue.get_match("alice", "artist", "spotify-one")["enriched"]["external_id"] == candidates[1]["id"]
     assert client.post(url, json={"mbid": None}, headers={"X-CSRF-Token": "test-csrf"}).json["status"] == "not_found"
 
 
@@ -112,12 +112,12 @@ def test_artist_autoconfirm_requires_spotify_relation(app, monkeypatch):
                               "relations": [{"artist": {"id": mbid}}]}]}
         return {"id": mbid, "name": "Unique", "genres": []}
 
-    monkeypatch.setattr(mb, "request", fake_request)
+    monkeypatch.setattr(mb_client, "request", fake_request)
     with app.app_context():
-        mb.enqueue("alice", "artist", "spotify-one", {"id": "spotify-one", "name": "Unique"})
-        mb.process_one()
-        assert mb.get_match("alice", "artist", "spotify-one")["status"] == "confirmed"
-        assert mb.get_match("alice", "artist", "spotify-one")["match_method"] == "spotify_url"
+        mb_queue.enqueue("alice", "artist", "spotify-one", {"id": "spotify-one", "name": "Unique"})
+        mb_queue.process_one()
+        assert mb_queue.get_match("alice", "artist", "spotify-one")["status"] == "confirmed"
+        assert mb_queue.get_match("alice", "artist", "spotify-one")["match_method"] == "spotify_url"
 
 
 def test_batch_url_recheck_and_manual_choice_preserved(app, monkeypatch):
@@ -133,27 +133,27 @@ def test_batch_url_recheck_and_manual_choice_preserved(app, monkeypatch):
                              for artist in ("spotify-one", "spotify-two")]}
         return {"id": path.split("/")[-1] if path.startswith("artist/") else first, "name": "Name", "genres": []}
 
-    monkeypatch.setattr(mb, "request", fake_request)
+    monkeypatch.setattr(mb_client, "request", fake_request)
     with app.app_context():
         for artist in ("spotify-one", "spotify-two", "spotify-manual"):
-            mb.enqueue("alice", "artist", artist, {"id": artist, "name": "Name"})
+            mb_queue.enqueue("alice", "artist", artist, {"id": artist, "name": "Name"})
         with storage.connect() as db:
             db.execute("DELETE FROM mb_jobs")
             db.execute("UPDATE mb_matches SET status='ambiguous',candidates=?",
-                       (mb._json([{"id": first, "name": "Name"}, {"id": second, "name": "Name"}]),))
-        assert mb.set_manual("alice", "artist", "spotify-manual", second)
-        mb.enqueue_rechecks()
-        mb.process_one()
-        assert mb.get_match("alice", "artist", "spotify-one")["mbid"] == first
-        assert mb.get_match("alice", "artist", "spotify-two")["mbid"] == first
-        assert mb.get_match("alice", "artist", "spotify-manual")["mbid"] == second
-        assert mb.get_match("alice", "artist", "spotify-manual")["match_method"] == "manual"
+                       (mb_client._json([{"id": first, "name": "Name"}, {"id": second, "name": "Name"}]),))
+        assert mb_queue.set_manual("alice", "artist", "spotify-manual", second)
+        mb_queue.enqueue_rechecks()
+        mb_queue.process_one()
+        assert mb_queue.get_match("alice", "artist", "spotify-one")["mbid"] == first
+        assert mb_queue.get_match("alice", "artist", "spotify-two")["mbid"] == first
+        assert mb_queue.get_match("alice", "artist", "spotify-manual")["mbid"] == second
+        assert mb_queue.get_match("alice", "artist", "spotify-manual")["match_method"] == "manual"
         assert len([call for call in calls if call[0] == "url"]) == 1
 
 
 def test_two_album_titles_alone_no_longer_confirm_an_artist(app, monkeypatch):
     mbid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-    monkeypatch.setattr(mb, "_spotify_albums", lambda _id: ["Alpha", "Beta", "Beta"])
+    monkeypatch.setattr(spotify_catalogue, "_spotify_albums", lambda _id: ["Alpha", "Beta", "Beta"])
 
     def fake_request(path, params=None):
         if path == "url":
@@ -164,11 +164,11 @@ def test_two_album_titles_alone_no_longer_confirm_an_artist(app, monkeypatch):
             return {"release-groups": [{"title": "Alpha"}, {"title": "Béta"}]}
         return {"id": mbid, "name": "Artist", "genres": []}
 
-    monkeypatch.setattr(mb, "request", fake_request)
+    monkeypatch.setattr(mb_client, "request", fake_request)
     with app.app_context():
-        mb.enqueue("alice", "artist", "spotify-one", {"id": "spotify-one", "name": "Artist"})
-        mb.process_one()
-        match = mb.get_match("alice", "artist", "spotify-one")
+        mb_queue.enqueue("alice", "artist", "spotify-one", {"id": "spotify-one", "name": "Artist"})
+        mb_queue.process_one()
+        match = mb_queue.get_match("alice", "artist", "spotify-one")
         assert match["status"] == "ambiguous"
         assert match["mbid"] is None
         assert match["match_evidence"]["ranked"][0]["recording_count"] == 0
@@ -177,44 +177,44 @@ def test_two_album_titles_alone_no_longer_confirm_an_artist(app, monkeypatch):
 def test_album_fallback_rejects_weak_or_homonym_evidence(app, monkeypatch):
     first = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     second = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-    monkeypatch.setattr(mb, "_direct_links", lambda ids: {key: set() for key in ids})
-    monkeypatch.setattr(mb, "album_comparison", lambda spotify_id, mbid: {
+    monkeypatch.setattr(recording_matching, "_direct_links", lambda ids: {key: set() for key in ids})
+    monkeypatch.setattr(spotify_catalogue, "album_comparison", lambda spotify_id, mbid: {
         "common_albums": ["Alpha", "Alpha"], "spotify_albums": [], "musicbrainz_albums": []})
-    monkeypatch.setattr(mb, "request", lambda path, params=None: {
+    monkeypatch.setattr(mb_client, "request", lambda path, params=None: {
         "artists": [{"id": first, "name": "Name"}, {"id": second, "name": "Name"}]})
     with app.app_context():
-        mb.enqueue("alice", "artist", "spotify-one", {"id": "spotify-one", "name": "Name"})
-        mb.process_one()
-        assert mb.get_match("alice", "artist", "spotify-one")["status"] == "ambiguous"
-        monkeypatch.setattr(mb, "request", lambda path, params=None: {
+        mb_queue.enqueue("alice", "artist", "spotify-one", {"id": "spotify-one", "name": "Name"})
+        mb_queue.process_one()
+        assert mb_queue.get_match("alice", "artist", "spotify-one")["status"] == "ambiguous"
+        monkeypatch.setattr(mb_client, "request", lambda path, params=None: {
             "artists": [{"id": first, "name": "Name"}]})
-        mb.enqueue("alice", "artist", "spotify-two", {"id": "spotify-two", "name": "Name"})
-        mb.process_one()
-        assert mb.get_match("alice", "artist", "spotify-two")["status"] == "ambiguous"
+        mb_queue.enqueue("alice", "artist", "spotify-two", {"id": "spotify-two", "name": "Name"})
+        mb_queue.process_one()
+        assert mb_queue.get_match("alice", "artist", "spotify-two")["status"] == "ambiguous"
 
 
 def test_multiple_direct_links_do_not_autoconfirm(app, monkeypatch):
     first = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     second = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-    monkeypatch.setattr(mb, "_direct_links", lambda ids: {key: {first, second} for key in ids})
-    monkeypatch.setattr(mb, "album_comparison", lambda spotify_id, mbid: {
+    monkeypatch.setattr(recording_matching, "_direct_links", lambda ids: {key: {first, second} for key in ids})
+    monkeypatch.setattr(spotify_catalogue, "album_comparison", lambda spotify_id, mbid: {
         "common_albums": [], "spotify_albums": [], "musicbrainz_albums": []})
-    monkeypatch.setattr(mb, "request", lambda path, params=None: {
+    monkeypatch.setattr(mb_client, "request", lambda path, params=None: {
         "artists": [{"id": first, "name": "Name"}, {"id": second, "name": "Name"}]})
     with app.app_context():
-        mb.enqueue("alice", "artist", "spotify-one", {"id": "spotify-one", "name": "Name"})
-        mb.process_one()
-        assert mb.get_match("alice", "artist", "spotify-one")["status"] == "ambiguous"
+        mb_queue.enqueue("alice", "artist", "spotify-one", {"id": "spotify-one", "name": "Name"})
+        mb_queue.process_one()
+        assert mb_queue.get_match("alice", "artist", "spotify-one")["status"] == "ambiguous"
 
 
 def test_comparison_is_account_scoped(app, monkeypatch):
     mbid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     with app.app_context():
-        mb.enqueue("alice", "artist", "spotify-one", {"id": "spotify-one", "name": "Name"})
+        mb_queue.enqueue("alice", "artist", "spotify-one", {"id": "spotify-one", "name": "Name"})
         with storage.connect() as db:
             db.execute("UPDATE mb_matches SET candidates=? WHERE user_id='alice'",
-                       (mb._json([{"id": mbid, "name": "Name"}]),))
-    monkeypatch.setattr(mb, "album_comparison", lambda spotify_id, candidate: {
+                       (mb_client._json([{"id": mbid, "name": "Name"}]),))
+    monkeypatch.setattr(spotify_catalogue, "album_comparison", lambda spotify_id, candidate: {
         "spotify_albums": ["Alpha"], "musicbrainz_albums": ["Alpha"], "common_albums": ["Alpha"]})
     client = app.test_client()
     login(client, "bob")
@@ -232,30 +232,30 @@ def test_missing_isrc_no_result_failure_and_resume(app, monkeypatch):
         searched.append((path, params))
         return {"recordings": []}
 
-    monkeypatch.setattr(mb, "request", no_result)
+    monkeypatch.setattr(mb_client, "request", no_result)
     with app.app_context():
-        mb.enqueue("alice", "recording", "song", {"name": "Song", "artists": [{"name": "Artist"}]})
-        mb.process_one()
+        mb_queue.enqueue("alice", "recording", "song", {"name": "Song", "artists": [{"name": "Artist"}]})
+        mb_queue.process_one()
         assert any(path == "recording" for path, _ in searched)
-        assert mb.get_match("alice", "recording", "song")["status"] == "not_found"
-        mb.enqueue("alice", "artist", "artist", {"name": "Artist"})
+        assert mb_queue.get_match("alice", "recording", "song")["status"] == "not_found"
+        mb_queue.enqueue("alice", "artist", "artist", {"name": "Artist"})
 
     def failed(path, params=None):
-        raise mb.TemporaryFailure("offline")
+        raise mb_client.TemporaryFailure("offline")
 
-    monkeypatch.setattr(mb, "request", failed)
+    monkeypatch.setattr(mb_client, "request", failed)
     with app.app_context():
-        mb.process_one()
-        assert mb.status_for("alice")["queued"] == 1
-        with mb.storage.connect() as db:
+        mb_queue.process_one()
+        assert mb_queue.status_for("alice")["queued"] == 1
+        with mb_client.storage.connect() as db:
             db.execute("UPDATE mb_jobs SET available_at=?", ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),))
     # A new app instance uses the same SQLite database and resumes the delayed job.
     restarted = create_app({"TESTING": True, "DATA_DIR": app.config["DATA_DIR"], "SECRET_KEY": "test"})
-    monkeypatch.setattr(mb, "request", lambda path, params=None: {"artists": []})
+    monkeypatch.setattr(mb_client, "request", lambda path, params=None: {"artists": []})
     with restarted.app_context():
-        mb.process_one()
-        assert mb.get_match("alice", "artist", "artist")["status"] == "not_found"
-        assert mb.status_for("alice")["queued"] == 0
+        mb_queue.process_one()
+        assert mb_queue.get_match("alice", "artist", "artist")["status"] == "not_found"
+        assert mb_queue.status_for("alice")["queued"] == 0
 
 
 def _recording_fixture():
@@ -276,35 +276,35 @@ def test_recording_url_confirms_only_matching_recording(app, monkeypatch):
     payload, candidates, linked = _recording_fixture()
     payload["album_id"] = "album-one"
     with app.app_context():
-        mb.enqueue("alice", "recording", payload["id"], payload)
-        monkeypatch.setattr(mb, "request", lambda path, params=None: {
+        mb_queue.enqueue("alice", "recording", payload["id"], payload)
+        monkeypatch.setattr(mb_client, "request", lambda path, params=None: {
             "urls": [{"resource": "https://open.spotify.com/track/track-one",
                       "relations": [{"recording": {"id": "recording-one"}}]},
                      {"resource": "https://open.spotify.com/album/album-one",
                       "relations": [{"release": {"id": "release-one"}}]}]})
-        links = mb._recording_links([{"user_id": "alice", "spotify_id": "track-one"}])
+        links = recording_matching._recording_links([{"user_id": "alice", "spotify_id": "track-one"}])
         assert links[("alice", "track-one")]["recordings"] == {"recording-one"}
         assert links[("alice", "track-one")]["releases"] == {"release-one"}
-        selected = mb._select_recording(payload, candidates, links[("alice", "track-one")])
+        selected = recording_matching._select_recording(payload, candidates, links[("alice", "track-one")])
         assert selected[:2] == ("recording-one", "spotify_url")
         linked["recordings"] = {"recording-two", "recording-three"}
-        monkeypatch.setattr(mb, "_release_context", lambda _id: [])
-        assert mb._select_recording(payload, candidates, linked)[:2] == ("recording-two", "disambiguation")
+        monkeypatch.setattr(recording_matching, "_release_context", lambda _id: [])
+        assert recording_matching._select_recording(payload, candidates, linked)[:2] == ("recording-two", "disambiguation")
 
 
 def test_multiple_recording_links_use_evidence_and_ignore_wrong_relation(app, monkeypatch):
     payload, candidates, _ = _recording_fixture()
     with app.app_context():
-        mb.enqueue("alice", "recording", payload["id"], payload)
-        monkeypatch.setattr(mb, "request", lambda path, params=None: {
+        mb_queue.enqueue("alice", "recording", payload["id"], payload)
+        monkeypatch.setattr(mb_client, "request", lambda path, params=None: {
             "urls": [{"resource": "https://open.spotify.com/track/track-one",
                       "relations": [{"recording": {"id": "recording-one"}},
                                     {"recording": {"id": "recording-two"}},
                                     {"artist": {"id": "wrong-entity"}}]}]})
-        links = mb._recording_links([{"user_id": "alice", "spotify_id": "track-one"}])[("alice", "track-one")]
+        links = recording_matching._recording_links([{"user_id": "alice", "spotify_id": "track-one"}])[("alice", "track-one")]
         assert links["recordings"] == {"recording-one", "recording-two"}
-        monkeypatch.setattr(mb, "_release_context", lambda _id: [])
-        assert mb._select_recording(payload, candidates, links)[:2] == ("recording-one", "disambiguation")
+        monkeypatch.setattr(recording_matching, "_release_context", lambda _id: [])
+        assert recording_matching._select_recording(payload, candidates, links)[:2] == ("recording-one", "disambiguation")
 
 
 def test_isrc_without_results_falls_back_to_name_search(app, monkeypatch):
@@ -317,10 +317,10 @@ def test_isrc_without_results_falls_back_to_name_search(app, monkeypatch):
         return {"recordings": [{"id": "recording-one", "title": "Song", "length": 180000,
                                 "artist-credit": [{"artist": {"name": "Singer"}}]}]}
 
-    monkeypatch.setattr(mb, "request", fake_request)
+    monkeypatch.setattr(mb_client, "request", fake_request)
     payload, _, _ = _recording_fixture()
     with app.app_context():
-        assert mb._recording_candidates(payload)[0]["id"] == "recording-one"
+        assert recording_matching._recording_candidates(payload)[0]["id"] == "recording-one"
     assert calls == ["isrc/USAAA1234567", "recording"]
 
 
@@ -329,13 +329,13 @@ def test_recording_release_evidence_requires_membership(app, monkeypatch, kind):
     payload, candidates, linked = _recording_fixture()
     release = {"id": "release-one", "title": "Shared Release", "date": "2020-06-01",
                "group_id": "group-one", "group_type": kind, "artist_names": ["Singer"]}
-    monkeypatch.setattr(mb, "_release_context", lambda mbid: [release] if mbid == "recording-one" else [])
+    monkeypatch.setattr(recording_matching, "_release_context", lambda mbid: [release] if mbid == "recording-one" else [])
     with app.app_context():
-        selected = mb._select_recording(payload, candidates, linked)
+        selected = recording_matching._select_recording(payload, candidates, linked)
         assert selected[:2] == ("recording-one", "disambiguation")
         assert selected[2]["release_type"] == kind
-        monkeypatch.setattr(mb, "_release_context", lambda _id: [])
-        assert "release_id" not in mb._select_recording(payload, candidates, linked)[2]
+        monkeypatch.setattr(recording_matching, "_release_context", lambda _id: [])
+        assert "release_id" not in recording_matching._select_recording(payload, candidates, linked)[2]
 
 
 def test_release_context_reads_recording_membership_and_group_type(app, monkeypatch):
@@ -347,9 +347,9 @@ def test_release_context_reads_recording_membership_and_group_type(app, monkeypa
                 "date": "2020-06-01", "artist-credit": [{"artist": {"name": "Singer"}}],
                 "release-group": {"id": "group-one", "primary-type": "EP"}}]}
 
-    monkeypatch.setattr(mb, "request", fake_request)
+    monkeypatch.setattr(mb_client, "request", fake_request)
     with app.app_context():
-        context = mb._release_context("recording-one")
+        context = recording_matching._release_context("recording-one")
     assert calls[0][0] == "release"
     assert calls[0][1]["recording"] == "recording-one"
     assert context[0]["group_type"] == "ep"
@@ -362,13 +362,13 @@ def test_album_url_is_evidence_only_and_contribution_fallback(app, monkeypatch):
     linked["releases"] = {"release-one"}
     release = {"id": "release-one", "title": "Different Title", "date": "2020-06-01",
                "group_id": "group-one", "group_type": "single", "artist_names": ["Other Singer"]}
-    monkeypatch.setattr(mb, "_release_context", lambda mbid: [release] if mbid == "recording-one" else [])
+    monkeypatch.setattr(recording_matching, "_release_context", lambda mbid: [release] if mbid == "recording-one" else [])
     with app.app_context():
-        selected = mb._select_recording(payload, candidates, linked)
+        selected = recording_matching._select_recording(payload, candidates, linked)
         assert selected[:2] == ("recording-one", "disambiguation")
         assert selected[2]["criteria"]["spotify_album_url"]
-        monkeypatch.setattr(mb, "_release_context", lambda _id: [])
-        assert mb._select_recording(payload, candidates, linked)[1] != "spotify_url"
+        monkeypatch.setattr(recording_matching, "_release_context", lambda _id: [])
+        assert recording_matching._select_recording(payload, candidates, linked)[1] != "spotify_url"
 
 
 def test_contribution_recognizes_featured_artist_on_main_artist_release(app, monkeypatch):
@@ -377,26 +377,26 @@ def test_contribution_recognizes_featured_artist_on_main_artist_release(app, mon
     candidates[0]["artist_names"] = ["Singer", "Guest"]
     release = {"id": "release-one", "title": "Shared Release", "date": "2020-06-01",
                "group_id": "group-one", "group_type": "single", "artist_names": ["Singer"]}
-    monkeypatch.setattr(mb, "_release_context", lambda mbid: [release] if mbid == "recording-one" else [])
+    monkeypatch.setattr(recording_matching, "_release_context", lambda mbid: [release] if mbid == "recording-one" else [])
     with app.app_context():
-        assert mb._select_recording(payload, candidates, linked)[:2] == ("recording-one", "disambiguation")
+        assert recording_matching._select_recording(payload, candidates, linked)[:2] == ("recording-one", "disambiguation")
 
 
 def test_recording_disambiguation_tie_and_duration_conflict(app, monkeypatch):
     payload, candidates, linked = _recording_fixture()
     release = {"id": "release-one", "title": "Shared Release", "date": "2020-06-01",
                "group_id": "group-one", "group_type": "single", "artist_names": ["Singer"]}
-    monkeypatch.setattr(mb, "_release_context", lambda mbid: [release] if mbid == "recording-one" else [])
+    monkeypatch.setattr(recording_matching, "_release_context", lambda mbid: [release] if mbid == "recording-one" else [])
     with app.app_context():
-        selected = mb._select_recording(payload, candidates, linked)
+        selected = recording_matching._select_recording(payload, candidates, linked)
         assert selected[:2] == ("recording-one", "disambiguation")
         assert selected[2]["selected_score"] == 100
-        monkeypatch.setattr(mb, "_release_context", lambda _id: [release])
+        monkeypatch.setattr(recording_matching, "_release_context", lambda _id: [release])
         candidates[1]["isrcs"] = [payload["isrc"]]
-        assert mb._select_recording(payload, candidates, linked)[:2] == ("recording-one", "first_candidate")
+        assert recording_matching._select_recording(payload, candidates, linked)[:2] == ("recording-one", "first_candidate")
         candidates[0]["length"] = 210000
         candidates[1]["length"] = 210000
-        assert mb._select_recording(payload, candidates, linked)[0] is None
+        assert recording_matching._select_recording(payload, candidates, linked)[0] is None
 
 
 def _bother_fixture():
@@ -436,9 +436,9 @@ def test_bother_disambiguates_by_ordered_evidence(app, monkeypatch, criterion):
         second_release["group_type"] = "single"  # Duration outranks type.
     else:
         first_release["group_type"] = "single"
-    monkeypatch.setattr(mb, "_release_context", lambda mbid: releases[mbid])
+    monkeypatch.setattr(recording_matching, "_release_context", lambda mbid: releases[mbid])
     with app.app_context():
-        selected = mb._select_recording(payload, candidates, linked)
+        selected = recording_matching._select_recording(payload, candidates, linked)
         assert selected[:2] == (second["id"], "disambiguation")
         assert selected[2]["ranked"][0]["id"] == second["id"]
         assert selected[2]["selection"] == "disambiguation"
@@ -451,14 +451,14 @@ def test_bother_uses_best_edition_independently_of_release_order(app, monkeypatc
     later_edition = {**first_release, "id": "later-edition", "date": "2020-01-01"}
     exact_edition = {**first_release, "id": "exact-edition", "date": payload["release_date"]}
     releases[candidates[1]["id"]][0]["date"] = "2002-08-01"
-    monkeypatch.setattr(mb, "_release_context", lambda mbid: releases[mbid])
+    monkeypatch.setattr(recording_matching, "_release_context", lambda mbid: releases[mbid])
     with app.app_context():
         for editions in ([later_edition, exact_edition], [exact_edition, later_edition]):
             releases[candidates[0]["id"]] = editions
-            selected = mb._select_recording(payload, candidates, linked)
+            selected = recording_matching._select_recording(payload, candidates, linked)
             assert selected[:2] == (candidates[0]["id"], "disambiguation")
             assert selected[2]["release_id"] == "exact-edition"
-            assert mb._recording_score(payload, candidates[0], editions, linked)["score"] == 90
+            assert recording_matching._recording_score(payload, candidates[0], editions, linked)["score"] == 90
 
 
 def test_bother_tie_uses_first_candidate_and_deduplicates_recordings(app, monkeypatch):
@@ -469,10 +469,10 @@ def test_bother_tie_uses_first_candidate_and_deduplicates_recordings(app, monkey
         calls.append(mbid)
         return releases[mbid] * 2
 
-    monkeypatch.setattr(mb, "_release_context", context)
+    monkeypatch.setattr(recording_matching, "_release_context", context)
     with app.app_context():
         for ordered in (candidates, candidates[::-1]):
-            selected = mb._select_recording(payload, [*ordered, ordered[0]], linked)
+            selected = recording_matching._select_recording(payload, [*ordered, ordered[0]], linked)
             assert selected[:2] == (ordered[0]["id"], "first_candidate")
             assert selected[2]["tied_candidates"] == [item["id"] for item in ordered]
             assert len(selected[3]) == 2
@@ -483,12 +483,12 @@ def test_bother_missing_metadata_still_uses_first_compatible_candidate(app, monk
     payload, candidates, _, linked = _bother_fixture()
     for field in ("album_name", "release_date", "duration_ms", "isrc"):
         payload.pop(field)
-    monkeypatch.setattr(mb, "_release_context", lambda *_: pytest.fail("No album context to look up"))
+    monkeypatch.setattr(recording_matching, "_release_context", lambda *_: pytest.fail("No album context to look up"))
     with app.app_context():
-        selected = mb._select_recording(payload, candidates, linked)
+        selected = recording_matching._select_recording(payload, candidates, linked)
         assert selected[:2] == ("z-first", "first_candidate")
         assert selected[2]["criteria"]["duration_delta_ms"] is None
-        assert "Infinity" not in mb._json(selected[2])
+        assert "Infinity" not in mb_client._json(selected[2])
 
 
 @pytest.mark.parametrize("date", ["2002", "2002-08", ""])
@@ -496,9 +496,9 @@ def test_bother_partial_or_missing_dates_do_not_invent_precision(app, monkeypatc
     payload, candidates, releases, linked = _bother_fixture()
     payload["release_date"] = date
     releases[candidates[1]["id"]][0]["date"] = "2002-08-01"
-    monkeypatch.setattr(mb, "_release_context", lambda mbid: releases[mbid])
+    monkeypatch.setattr(recording_matching, "_release_context", lambda mbid: releases[mbid])
     with app.app_context():
-        selected = mb._select_recording(payload, candidates, linked)
+        selected = recording_matching._select_recording(payload, candidates, linked)
         assert selected[:2] == (candidates[0]["id"], "first_candidate")
 
 
@@ -514,10 +514,10 @@ def test_bother_fallback_rejects_incompatible_recordings(app, monkeypatch, confl
             item["length"] += 15001
     if conflict == "recording_url":
         linked["recordings"] = {"other-recording"}
-    monkeypatch.setattr(mb, "_release_context", lambda mbid: releases[mbid])
-    monkeypatch.setattr(mb, "request", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(recording_matching, "_release_context", lambda mbid: releases[mbid])
+    monkeypatch.setattr(mb_client, "request", lambda *_args, **_kwargs: {})
     with app.app_context():
-        selected = mb._select_recording(payload, candidates, linked)
+        selected = recording_matching._select_recording(payload, candidates, linked)
         assert selected[0] is None
         assert selected[1] is None
 
@@ -530,49 +530,49 @@ def test_release_context_paginates_all_editions(app, monkeypatch):
         return {"release-count": 2, "releases": [{"id": str(params["offset"]), "title": "Stone Sour",
                 "release-group": {"id": "shared-group", "primary-type": "Album"}}]}
 
-    monkeypatch.setattr(mb, "request", request)
+    monkeypatch.setattr(mb_client, "request", request)
     with app.app_context():
-        assert len(mb._release_context("bother")) == 2
+        assert len(recording_matching._release_context("bother")) == 2
     assert offsets == [0, 1]
 
 
 def test_version_three_rechecks_once_and_preserves_existing_decisions(app, monkeypatch):
     payload, candidates, releases, linked = _bother_fixture()
-    monkeypatch.setattr(mb, "_recording_links", lambda *_: {})
-    monkeypatch.setattr(mb, "_recording_candidates", lambda data: candidates if data["id"] == "old" else [
+    monkeypatch.setattr(recording_matching, "_recording_links", lambda *_: {})
+    monkeypatch.setattr(recording_matching, "_recording_candidates", lambda data: candidates if data["id"] == "old" else [
         {**candidates[0], "artist_names": ["Other artist"]}])
-    monkeypatch.setattr(mb, "_release_context", lambda mbid: releases[mbid])
-    monkeypatch.setattr(mb, "_details", lambda _kind, mbid: {"external_id": mbid})
+    monkeypatch.setattr(recording_matching, "_release_context", lambda mbid: releases[mbid])
+    monkeypatch.setattr(mb_client, "_details", lambda _kind, mbid: {"external_id": mbid})
     with app.app_context():
         for spotify_id in ("old", "still-ambiguous", "current", "confirmed", "manual", "rejected"):
-            mb.enqueue("alice", "recording", spotify_id, {**payload, "id": spotify_id})
-        assert mb.set_manual("alice", "recording", "manual", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-        assert mb.set_manual("alice", "recording", "rejected", None)
+            mb_queue.enqueue("alice", "recording", spotify_id, {**payload, "id": spotify_id})
+        assert mb_queue.set_manual("alice", "recording", "manual", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        assert mb_queue.set_manual("alice", "recording", "rejected", None)
         with storage.connect() as db:
             db.execute("UPDATE mb_matches SET status='ambiguous',match_version=2 WHERE manual=0")
             db.execute("UPDATE mb_matches SET match_version=3 WHERE spotify_id='current'")
             db.execute("UPDATE mb_matches SET status='confirmed',mbid='kept' WHERE spotify_id='confirmed'")
             db.execute("DELETE FROM mb_jobs")
-        preserved = {key: mb.get_match("alice", "recording", key)
+        preserved = {key: mb_queue.get_match("alice", "recording", key)
                      for key in ("current", "confirmed", "manual", "rejected")}
-        assert mb.progress_for("alice")["completed"] == 4
-        assert mb.progress_for("alice")["reviews"] == 1
-        mb.enqueue_rechecks()
-        mb.enqueue_rechecks()
-        assert mb.status_for("alice")["queued"] == 2
-        assert mb.process_one()
-        assert not mb.process_one()
-        old = mb.get_match("alice", "recording", "old")
+        assert mb_queue.progress_for("alice")["completed"] == 4
+        assert mb_queue.progress_for("alice")["reviews"] == 1
+        mb_queue.enqueue_rechecks()
+        mb_queue.enqueue_rechecks()
+        assert mb_queue.status_for("alice")["queued"] == 2
+        assert mb_queue.process_one()
+        assert not mb_queue.process_one()
+        old = mb_queue.get_match("alice", "recording", "old")
         assert old["status"] == "confirmed"
         assert old["match_method"] == "first_candidate"
         assert old["match_evidence"]["tied_candidates"] == ["z-first", "a-second"]
-        assert mb.get_match("alice", "recording", "still-ambiguous")["status"] == "ambiguous"
+        assert mb_queue.get_match("alice", "recording", "still-ambiguous")["status"] == "ambiguous"
         with storage.connect() as db:
             assert db.execute("SELECT match_version FROM mb_matches WHERE spotify_id='old'").fetchone()[0] == 3
-        mb.enqueue_rechecks()
-        assert not mb.process_one()
+        mb_queue.enqueue_rechecks()
+        assert not mb_queue.process_one()
         for key, original in preserved.items():
-            assert mb.get_match("alice", "recording", key) == original
+            assert mb_queue.get_match("alice", "recording", key) == original
 
 
 def test_recheck_backfills_recording_and_preserves_manual_choice(app):
@@ -580,20 +580,20 @@ def test_recheck_backfills_recording_and_preserves_manual_choice(app):
             "album_type": "single", "release_date": "2020-06-01"}
     with app.app_context():
         storage.replace_playlist_items("alice", "playlist", [item])
-        mb.enqueue("alice", "recording", "track-one", {"name": "Song", "artists": [{"name": "Singer"}]})
-        mb.enqueue("alice", "recording", "manual-track", {"name": "Manual"})
+        mb_queue.enqueue("alice", "recording", "track-one", {"name": "Song", "artists": [{"name": "Singer"}]})
+        mb_queue.enqueue("alice", "recording", "manual-track", {"name": "Manual"})
         with storage.connect() as db:
             db.execute("DELETE FROM mb_jobs")
             db.execute("UPDATE mb_matches SET status='ambiguous',match_version=1")
-        assert mb.set_manual("alice", "recording", "manual-track", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        assert mb_queue.set_manual("alice", "recording", "manual-track", "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         with storage.connect() as db:
             db.execute("DELETE FROM mb_jobs")
-        mb.enqueue_rechecks()
-        match = mb.get_match("alice", "recording", "track-one")
+        mb_queue.enqueue_rechecks()
+        match = mb_queue.get_match("alice", "recording", "track-one")
         assert match["spotify"]["album_id"] == "album-one"
-        assert mb.status_for("alice")["queued"] == 1
-        assert mb.status_for("alice")["recordings"]["ambiguous"] == 1
-        assert mb.get_match("alice", "recording", "manual-track")["match_method"] == "manual"
+        assert mb_queue.status_for("alice")["queued"] == 1
+        assert mb_queue.status_for("alice")["recordings"]["ambiguous"] == 1
+        assert mb_queue.get_match("alice", "recording", "manual-track")["match_method"] == "manual"
 
 
 def test_playlist_enqueue_keeps_release_metadata(app):
@@ -601,8 +601,8 @@ def test_playlist_enqueue_keeps_release_metadata(app):
             "artists": [{"id": "artist-one", "name": "Singer"}], "album_name": "An EP",
             "album_id": "album-one", "album_type": "single", "release_date": "2020-06"}
     with app.app_context():
-        mb.enqueue_playlist("alice", [item])
-        stored = mb.get_match("alice", "recording", "track-one")["spotify"]
+        mb_queue.enqueue_playlist("alice", [item])
+        stored = mb_queue.get_match("alice", "recording", "track-one")["spotify"]
         assert (stored["album_name"], stored["album_id"], stored["release_date"]) == (
             "An EP", "album-one", "2020-06")
 
@@ -613,7 +613,7 @@ def test_progress_page_uses_completed_jobs_and_is_account_scoped(app):
     assert client.get("/musicbrainz/progress").status_code == 401
     with app.app_context():
         for spotify_id in ("done", "reviewed", "old-review", "pending"):
-            mb.enqueue("alice", "recording", spotify_id, {"name": spotify_id})
+            mb_queue.enqueue("alice", "recording", spotify_id, {"name": spotify_id})
         with storage.connect() as db:
             db.execute("UPDATE mb_matches SET status='confirmed',match_version=2 WHERE spotify_id='done'")
             db.execute("UPDATE mb_matches SET status='ambiguous',match_version=3 WHERE spotify_id='reviewed'")
@@ -633,36 +633,36 @@ def test_progress_page_uses_completed_jobs_and_is_account_scoped(app):
 def test_repeatedly_incomplete_artist_is_deferred_daily_and_counted_apart(app, monkeypatch):
     from app.services import artist_matching
     monkeypatch.setattr(artist_matching, "analyze", lambda *args: (None, None, {"complete": False}, [{"id": "candidate"}]))
-    monkeypatch.setattr(mb, "_artist_candidates", lambda payload: [])
+    monkeypatch.setattr(recording_matching, "_artist_candidates", lambda payload: [])
     with app.app_context():
         for spotify_id in ("early", "stuck"):
-            mb.enqueue("alice", "artist", spotify_id, {"id": spotify_id, "name": spotify_id})
+            mb_queue.enqueue("alice", "artist", spotify_id, {"id": spotify_id, "name": spotify_id})
         with storage.connect() as db:
-            db.execute("UPDATE mb_jobs SET attempts=?", (mb.DEFERRED_AFTER - 1,))
+            db.execute("UPDATE mb_jobs SET attempts=?", (mb_queue.DEFERRED_AFTER - 1,))
             db.execute("UPDATE mb_jobs SET attempts=0 WHERE spotify_id='early'")
             jobs = [dict(row) for row in db.execute("SELECT * FROM mb_jobs")]
         for job in jobs:
-            mb._process_job(job)
+            mb_queue._process_job(job)
         with storage.connect() as db:
             rows = {row["spotify_id"]: dict(row) for row in db.execute("SELECT * FROM mb_jobs")}
         assert rows["early"]["state"] == "queued"
-        assert rows["stuck"]["state"] == "deferred" and rows["stuck"]["attempts"] == mb.DEFERRED_AFTER
+        assert rows["stuck"]["state"] == "deferred" and rows["stuck"]["attempts"] == mb_queue.DEFERRED_AFTER
         delay = datetime.fromisoformat(rows["stuck"]["available_at"]) - datetime.now(timezone.utc)
-        assert timedelta(hours=23) < delay <= mb.DEFERRED_DELAY
-        progress = mb.progress_for("alice", "artist")
+        assert timedelta(hours=23) < delay <= mb_queue.DEFERRED_DELAY
+        progress = mb_queue.progress_for("alice", "artist")
         assert (progress["queued"], progress["deferred"], progress["completed"]) == (1, 1, 0)
         with storage.connect() as db:
             db.execute("UPDATE mb_jobs SET available_at=? WHERE spotify_id='stuck'", (storage.now(),))
             db.execute("DELETE FROM mb_jobs WHERE spotify_id='early'")
-        assert mb.claim_job()["spotify_id"] == "stuck"
+        assert mb_queue.claim_job()["spotify_id"] == "stuck"
 
 
 def test_progress_and_reviews_are_separate_for_artists_and_tracks(app):
     with app.app_context():
         for kind, prefix, count in (("artist", "artist", 22), ("recording", "track", 3)):
             for index in range(count):
-                mb.enqueue("alice", kind, f"{prefix}-{index:02}", {"name": f"{prefix}-{index:02}"})
-        mb.enqueue("bob", "artist", "private", {"name": "Private"})
+                mb_queue.enqueue("alice", kind, f"{prefix}-{index:02}", {"name": f"{prefix}-{index:02}"})
+        mb_queue.enqueue("bob", "artist", "private", {"name": "Private"})
         with storage.connect() as db:
             db.execute("UPDATE mb_matches SET status='ambiguous',match_version=2 "
                        "WHERE user_id='alice' AND kind='artist'")
@@ -693,45 +693,45 @@ def test_progress_and_reviews_are_separate_for_artists_and_tracks(app):
 def test_global_rate_limit_and_http_failure(app, monkeypatch):
     times = iter([100.0, 100.0, 101.1])
     sleeps = []
-    monkeypatch.setattr(mb.time, "time", lambda: next(times))
-    monkeypatch.setattr(mb.time, "sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(mb_client.time, "time", lambda: next(times))
+    monkeypatch.setattr(mb_client.time, "sleep", lambda seconds: sleeps.append(seconds))
     with app.app_context():
-        mb._rate_slot()
-        mb._rate_slot()
+        mb_client._rate_slot()
+        mb_client._rate_slot()
     assert sleeps == [pytest.approx(1.1)]
 
     def offline(_req, timeout):
         raise URLError("offline")
 
-    monkeypatch.setattr(mb, "urlopen", offline)
-    monkeypatch.setattr(mb, "_rate_slot", lambda: None)
-    with app.app_context(), pytest.raises(mb.TemporaryFailure):
-        mb.request("artist", {"query": "test"})
+    monkeypatch.setattr(mb_client, "urlopen", offline)
+    monkeypatch.setattr(mb_client, "_rate_slot", lambda: None)
+    with app.app_context(), pytest.raises(mb_client.TemporaryFailure):
+        mb_client.request("artist", {"query": "test"})
 
 
 def test_confirmed_enrichment_is_kept_without_refresh(app):
     mbid = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
     with app.app_context():
-        mb.enqueue("alice", "artist", "artist1", {"id": "artist1", "name": "Artist"})
+        mb_queue.enqueue("alice", "artist", "artist1", {"id": "artist1", "name": "Artist"})
         with storage.connect() as db:
             db.execute("DELETE FROM mb_jobs")
             db.execute("UPDATE mb_matches SET status='confirmed',mbid=?,enriched=?,updated_at=?",
-                       (mbid, mb._json({"source": "musicbrainz", "external_id": mbid, "name": "Artist"}),
+                       (mbid, mb_client._json({"source": "musicbrainz", "external_id": mbid, "name": "Artist"}),
                         (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()))
-        mb.enqueue("alice", "artist", "artist1", {"id": "artist1", "name": "Artist"})
-        assert mb.status_for("alice")["queued"] == 0
-        assert mb.get_match("alice", "artist", "artist1")["enriched"]["name"] == "Artist"
+        mb_queue.enqueue("alice", "artist", "artist1", {"id": "artist1", "name": "Artist"})
+        assert mb_queue.status_for("alice")["queued"] == 0
+        assert mb_queue.get_match("alice", "artist", "artist1")["enriched"]["name"] == "Artist"
 
 
 def test_unmatched_entity_is_retried_after_seven_days(app):
     with app.app_context():
-        mb.enqueue("alice", "artist", "artist1", {"id": "artist1", "name": "Artist"})
+        mb_queue.enqueue("alice", "artist", "artist1", {"id": "artist1", "name": "Artist"})
         with storage.connect() as db:
             db.execute("DELETE FROM mb_jobs")
             db.execute("UPDATE mb_matches SET status='not_found',updated_at=?",
                        ((datetime.now(timezone.utc) - timedelta(days=8)).isoformat(),))
-        mb.enqueue("alice", "artist", "artist1", {"id": "artist1", "name": "Artist"})
-        assert mb.status_for("alice")["queued"] == 1
+        mb_queue.enqueue("alice", "artist", "artist1", {"id": "artist1", "name": "Artist"})
+        assert mb_queue.status_for("alice")["queued"] == 1
 
 
 def test_empty_http_result_expires_after_seven_days(app, monkeypatch):
@@ -739,20 +739,20 @@ def test_empty_http_result_expires_after_seven_days(app, monkeypatch):
     with app.app_context():
         with storage.connect() as db:
             db.execute("INSERT INTO mb_http_cache VALUES(?,?,?)",
-                       (key, mb._json({"artists": []}),
+                       (key, mb_client._json({"artists": []}),
                         (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()))
-        monkeypatch.setattr(mb, "_rate_slot", lambda: None)
-        monkeypatch.setattr(mb, "urlopen", lambda request, timeout: BytesIO(b'{"artists":[{"id":"new"}]}'))
-        assert mb.request("artist", {"query": "Artist"})["artists"][0]["id"] == "new"
+        monkeypatch.setattr(mb_client, "_rate_slot", lambda: None)
+        monkeypatch.setattr(mb_client, "urlopen", lambda request, timeout: BytesIO(b'{"artists":[{"id":"new"}]}'))
+        assert mb_client.request("artist", {"query": "Artist"})["artists"][0]["id"] == "new"
 
 
 def test_graph_and_pages_expose_provenance(app):
     with app.app_context():
         storage.replace_followed_artists("alice", [{"id": "artist1", "name": "Artist", "genres": ["Rock"]}])
-        mb.enqueue("alice", "artist", "artist1", {"id": "artist1", "name": "Artist"})
+        mb_queue.enqueue("alice", "artist", "artist1", {"id": "artist1", "name": "Artist"})
         with storage.connect() as db:
             db.execute("UPDATE mb_matches SET status='confirmed',mbid=?,enriched=? WHERE user_id='alice'",
-                       ("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", mb._json({
+                       ("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", mb_client._json({
                            "source": "musicbrainz", "external_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                            "genres": [{"name": "rock", "source": "musicbrainz", "level": "artist",
                                        "external_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}],
@@ -779,52 +779,52 @@ def test_graph_and_pages_expose_provenance(app):
 @pytest.mark.parametrize("stage", ["lookup", "analysis"])
 def test_error_rate_counts_failed_attempts_retries_and_survives_restart(app, monkeypatch, kind, stage):
     def unavailable(*_args, **_kwargs):
-        raise mb.TemporaryFailure("MusicBrainz HTTP 503")
+        raise mb_client.TemporaryFailure("MusicBrainz HTTP 503")
 
     lookup = "_direct_links" if kind == "artist" else "_recording_links"
     candidates = "_artist_candidates" if kind == "artist" else "_recording_candidates"
-    monkeypatch.setattr(mb, lookup, unavailable if stage == "lookup" else lambda *_: {})
-    monkeypatch.setattr(mb, candidates, unavailable if stage == "analysis" else lambda *_: [])
+    monkeypatch.setattr(recording_matching, lookup, unavailable if stage == "lookup" else lambda *_: {})
+    monkeypatch.setattr(recording_matching, candidates, unavailable if stage == "analysis" else lambda *_: [])
     with app.app_context():
-        assert mb.progress_for("alice", kind)["errors"]["percent"] is None
-        mb.enqueue("alice", kind, "retry", {"name": "Retry"})
-        assert mb.process_one()
-        errors = mb.progress_for("alice", kind)["errors"]
+        assert mb_queue.progress_for("alice", kind)["errors"]["percent"] is None
+        mb_queue.enqueue("alice", kind, "retry", {"name": "Retry"})
+        assert mb_queue.process_one()
+        errors = mb_queue.progress_for("alice", kind)["errors"]
         assert errors["attempts"] == 1
         assert errors["failed"] == 1
         assert errors["percent"] == 100
-        assert mb.progress_for("alice", kind)["completed"] == 0
+        assert mb_queue.progress_for("alice", kind)["completed"] == 0
         since = errors["since"]
         with storage.connect() as db:
             db.execute("UPDATE mb_jobs SET available_at=?", (storage.now(),))
     restarted = create_app({"TESTING": True, "DATA_DIR": app.config["DATA_DIR"], "SECRET_KEY": "test"})
-    monkeypatch.setattr(mb, lookup, lambda *_: {})
-    monkeypatch.setattr(mb, candidates, lambda *_: [])
+    monkeypatch.setattr(recording_matching, lookup, lambda *_: {})
+    monkeypatch.setattr(recording_matching, candidates, lambda *_: [])
     with restarted.app_context():
-        assert mb.process_one()
-        data = mb.progress_for("alice", kind)
+        assert mb_queue.process_one()
+        data = mb_queue.progress_for("alice", kind)
         assert data["not_found"] == 1  # Empty results are successful analyses.
         assert data["completed"] == 1
         assert data["errors"] == {"attempts": 2, "failed": 1, "percent": 50, "since": since}
-        mb.enqueue("alice", kind, "second", {"name": "Second"})
-        assert mb.process_one()
-        assert mb.progress_for("alice", kind)["errors"]["percent"] == 33.3
-        assert mb.progress_for("bob", kind)["errors"]["attempts"] == 0
+        mb_queue.enqueue("alice", kind, "second", {"name": "Second"})
+        assert mb_queue.process_one()
+        assert mb_queue.progress_for("alice", kind)["errors"]["percent"] == 33.3
+        assert mb_queue.progress_for("bob", kind)["errors"]["attempts"] == 0
         other_kind = "recording" if kind == "artist" else "artist"
-        assert mb.progress_for("alice", other_kind)["errors"]["attempts"] == 0
+        assert mb_queue.progress_for("alice", other_kind)["errors"]["attempts"] == 0
 
 
 def test_batched_lookup_failures_count_once_per_job_and_account(app, monkeypatch):
     def unavailable(*_args, **_kwargs):
-        raise mb.TemporaryFailure("MusicBrainz HTTP 503")
-    monkeypatch.setattr(mb, "_direct_links", unavailable)
+        raise mb_client.TemporaryFailure("MusicBrainz HTTP 503")
+    monkeypatch.setattr(recording_matching, "_direct_links", unavailable)
     with app.app_context():
-        mb.enqueue("alice", "artist", "one", {"name": "One"})
-        mb.enqueue("alice", "artist", "two", {"name": "Two"})
-        mb.enqueue("bob", "artist", "one", {"name": "Other One"})
-        assert mb.process_one()
-        assert mb.progress_for("alice", "artist")["errors"]["attempts"] == 2
-        assert mb.progress_for("alice", "artist")["errors"]["failed"] == 2
-        assert mb.progress_for("bob", "artist")["errors"]["failed"] == 1
-        assert not mb.process_one()  # Waiting for retries does not count as another failure.
-        assert mb.progress_for("alice", "artist")["errors"]["failed"] == 2
+        mb_queue.enqueue("alice", "artist", "one", {"name": "One"})
+        mb_queue.enqueue("alice", "artist", "two", {"name": "Two"})
+        mb_queue.enqueue("bob", "artist", "one", {"name": "Other One"})
+        assert mb_queue.process_one()
+        assert mb_queue.progress_for("alice", "artist")["errors"]["attempts"] == 2
+        assert mb_queue.progress_for("alice", "artist")["errors"]["failed"] == 2
+        assert mb_queue.progress_for("bob", "artist")["errors"]["failed"] == 1
+        assert not mb_queue.process_one()  # Waiting for retries does not count as another failure.
+        assert mb_queue.progress_for("alice", "artist")["errors"]["failed"] == 2

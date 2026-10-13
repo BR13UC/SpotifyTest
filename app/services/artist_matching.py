@@ -4,9 +4,11 @@ import json
 import re
 from difflib import SequenceMatcher
 
+from flask import current_app
 from spotipy.exceptions import SpotifyException
 
 from app import storage
+from app.services import artist_sites, mb_client, spotify_catalogue
 
 
 VERSION = 2
@@ -39,39 +41,37 @@ def library_tracks(user_id, spotify_id):
 
 
 def browse(path, params, key):
-    from app.services import musicbrainz as mb
     items = {}
     offset = 0
     previous = set()
     while True:
-        page = mb.request(path, {**params, 'limit': 100, 'offset': offset})
+        page = mb_client.request(path, {**params, 'limit': 100, 'offset': offset})
         entries = page.get(key, [])
         for item in entries:
             if item.get('id'):
                 items[item['id']] = item
         total = page.get(f'{path}-count', page.get('count'))
         if not entries and total is not None and offset < total:
-            raise mb.TemporaryFailure('MusicBrainz pagination incomplete')
+            raise mb_client.TemporaryFailure('MusicBrainz pagination incomplete')
         if not entries or (total is not None and offset + len(entries) >= total) or (total is None and len(entries) < 100):
             return list(items.values())
         if offset and not any(item.get('id') not in previous for item in entries):
-            raise mb.TemporaryFailure('MusicBrainz pagination did not advance')
+            raise mb_client.TemporaryFailure('MusicBrainz pagination did not advance')
         previous = set(items)
         offset += len(entries)
 
 
 def spotify_releases(spotify_id):
-    from app.services import musicbrainz as mb
     cache_key = f'artist-score-releases:{spotify_id}'
     with storage.connect() as db:
         cached = db.execute('SELECT payload,updated_at FROM mb_http_cache WHERE cache_key=?', (cache_key,)).fetchone()
-    if cached and not storage.is_stale(cached['updated_at'], mb.CACHE_AGE):
+    if cached and not storage.is_stale(cached['updated_at'], mb_client.CACHE_AGE):
         return json.loads(cached['payload'])
-    if not mb.current_app.config.get('SPOTIPY_CLIENT_ID') or not mb.current_app.config.get('SPOTIPY_CLIENT_SECRET'):
+    if not current_app.config.get('SPOTIPY_CLIENT_ID') or not current_app.config.get('SPOTIPY_CLIENT_SECRET'):
         return None
     items, offset = {}, 0
     while True:
-        page = mb._catalogue_albums(spotify_id, album_type='album,single,appears_on', limit=50, offset=offset)
+        page = spotify_catalogue._catalogue_albums(spotify_id, album_type='album,single,appears_on', limit=50, offset=offset)
         previous = set(items)
         for item in page.get('items', []):
             if item.get('id'):
@@ -79,9 +79,9 @@ def spotify_releases(spotify_id):
         if not page.get('next'):
             break
         if not page.get('items'):
-            raise mb.TemporaryFailure('Spotify pagination did not advance')
+            raise mb_client.TemporaryFailure('Spotify pagination did not advance')
         if previous == set(items):
-            raise mb.TemporaryFailure('Spotify pagination repeated a page')
+            raise mb_client.TemporaryFailure('Spotify pagination repeated a page')
         offset += len(page['items'])
     result = list(items.values())
     with storage.connect() as db:
@@ -101,26 +101,24 @@ def _isrc(value):
 
 
 def _release_key(value):
-    from app.services import musicbrainz as mb
-    value = mb._fold(value)
+    value = mb_client._fold(value)
     editions = r'(?:remaster|deluxe|expanded|anniversary|edition|reissue)'
     value = re.sub(r'\s*[\(\[][^(\[]*' + editions + r'[^)\]]*[\)\]]', '', value)
     value = re.sub(r'\s+-\s+.*' + editions + r'.*$', '', value)
-    return mb._album_key(value)
+    return mb_client._album_key(value)
 
 
 def track_recordings(track):
-    from app.services import musicbrainz as mb
     entities = {}
     code = _isrc(track.get('isrc'))
     if code:
-        for item in mb.request(f'isrc/{code}', {'inc': 'artist-credits'}).get('recordings', []):
+        for item in mb_client.request(f'isrc/{code}', {'inc': 'artist-credits'}).get('recordings', []):
             # An ISRC lookup itself proves membership even if the response omits isrcs.
             item = {**item, 'isrcs': list(set(item.get('isrcs', [])) | {code})}
             entities[item['id']] = item
     if track.get('name'):
-        artists = ' OR '.join(f'artist:"{mb._query_text(a.get("name"))}"' for a in track.get('artists', []) if a.get('name'))
-        query = f'recording:"{mb._query_text(track["name"])}"'
+        artists = ' OR '.join(f'artist:"{mb_client._query_text(a.get("name"))}"' for a in track.get('artists', []) if a.get('name'))
+        query = f'recording:"{mb_client._query_text(track["name"])}"'
         if artists:
             query += f' AND ({artists})'
         for item in browse('recording', {'query': query}, 'recordings'):
@@ -130,13 +128,12 @@ def track_recordings(track):
 
 def assess(payload, candidate, entity, tracks, recordings, spotify, releases, direct=False, complete=True):
     """Pure scoring: correlated evidence is counted once within each family."""
-    from app.services import musicbrainz as mb
     points = {'recordings': 0, 'discography': 0, 'name': 0, 'context': 0}
     evidence, matched, matched_tracks = [], {}, set()
     warnings = list(entity.get('_warnings', []))
     aliases = [a.get('name', '') for a in entity.get('aliases', [])]
-    name = mb._album_key(payload.get('name'))
-    names = [mb._album_key(value) for value in [candidate.get('name'), *aliases] if value]
+    name = mb_client._album_key(payload.get('name'))
+    names = [mb_client._album_key(value) for value in [candidate.get('name'), *aliases] if value]
     if name and name in names:
         points['name'] = 10
     elif name and names and max(SequenceMatcher(None, name, value).ratio() for value in names) >= .85:
@@ -186,7 +183,7 @@ def assess(payload, candidate, entity, tracks, recordings, spotify, releases, di
     spotify_by_title = {}
     for item in spotify or []:
         title = _release_key(item.get('name') or item.get('album_name'))
-        if title and title not in mb.GENERIC_ALBUMS:
+        if title and title not in mb_client.GENERIC_ALBUMS:
             spotify_by_title.setdefault(title, item)
     common = {}
     for release in releases:
@@ -213,7 +210,7 @@ def assess(payload, candidate, entity, tracks, recordings, spotify, releases, di
         if key in matched_tracks:
             continue
         for recording in recordings.get(key, []):
-            if candidate['id'] not in _credits(recording) or mb._album_key(track.get('name')) != mb._album_key(recording.get('title')):
+            if candidate['id'] not in _credits(recording) or mb_client._album_key(track.get('name')) != mb_client._album_key(recording.get('title')):
                 continue
             extra = _credits(recording) - {candidate['id']}
             if extra.intersection(track.get('verified_collaborators', [])):
@@ -266,15 +263,13 @@ def select(ranked):
 
 
 def analyze(user_id, payload, candidates, linked):
-    from app.services import musicbrainz as mb
-    from app.services.artist_sites import identity_links
     # One MusicBrainz artist declaring this exact Spotify URL is the identity: homonyms, library tracks
     # and discographies cannot change the decision, so only that candidate and its own sites are checked.
     shortcut = len(linked) == 1
     by_id = {item['id']: item for item in candidates if not shortcut or item['id'] in linked}
     for mbid in linked:
         if mbid not in by_id:
-            by_id[mbid] = mb._candidate(mb.request(f'artist/{mbid}', {'inc': 'aliases+url-rels'}))
+            by_id[mbid] = mb_client._candidate(mb_client.request(f'artist/{mbid}', {'inc': 'aliases+url-rels'}))
     tracks = [] if shortcut else library_tracks(user_id, payload['id'])
     with storage.connect() as db:
         verified = {row['spotify_id']: row['mbid'] for row in db.execute(
@@ -292,7 +287,7 @@ def analyze(user_id, payload, candidates, linked):
     for index, track in enumerate(tracks):
         try:
             recordings[track.get('spotify_id') or track.get('id')] = track_recordings(track)
-        except mb.TemporaryFailure as error:
+        except mb_client.TemporaryFailure as error:
             complete = False
             errors.append(str(error))
         progress('tracks', index + 1, len(tracks))
@@ -302,7 +297,7 @@ def analyze(user_id, payload, candidates, linked):
         progress('catalogue', 0, 1)
         try:
             spotify = spotify_releases(payload['id'])
-        except (mb.TemporaryFailure, SpotifyException) as error:
+        except (mb_client.TemporaryFailure, SpotifyException) as error:
             spotify, complete = None, False
             errors.append(str(error))
     # A missing catalogue prevents score-based decisions, but not direct identity.
@@ -312,16 +307,16 @@ def analyze(user_id, payload, candidates, linked):
         progress('candidates', index, len(by_id), candidate.get('name'))
         candidate_complete = complete
         try:
-            entity = mb.request(f'artist/{candidate["id"]}', {'inc': 'aliases+url-rels'})
+            entity = mb_client.request(f'artist/{candidate["id"]}', {'inc': 'aliases+url-rels'})
             if entity.get('id') != candidate['id']:
-                raise mb.TemporaryFailure('MusicBrainz candidate details unavailable')
-            urls, warnings, conflicts, site_complete = identity_links(entity, payload['id'])
+                raise mb_client.TemporaryFailure('MusicBrainz candidate details unavailable')
+            urls, warnings, conflicts, site_complete = artist_sites.identity_links(entity, payload['id'])
             entity = {**entity, '_direct_urls': urls, '_warnings': warnings, '_conflicts': conflicts}
             # With a unique direct link, an unreachable own site cannot add proof; only a readable conflict blocks.
             candidate_complete = candidate_complete and (site_complete or shortcut)
             errors.extend(f"Official website unavailable: {w['url']}" for w in warnings if w.get('temporary'))
             releases = [] if shortcut else browse('release-group', {'artist': candidate['id'], 'inc': 'artist-credits'}, 'release-groups')
-        except mb.TemporaryFailure as error:
+        except mb_client.TemporaryFailure as error:
             entity, releases, candidate_complete = {}, [], False
             errors.append(str(error))
         ranked.append(assess(payload, candidate, entity, tracks, recordings,

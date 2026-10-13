@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, redirect, render_template, session, url_for
 from app.spotify_auth import is_valid_token
 from app import storage
-from app.services import musicbrainz
+from app.services import mb_queue
 
 router_bp = Blueprint('router', __name__)
 
@@ -63,7 +63,7 @@ def home_summary():
     user_id = session['spotify_user_id']
     playlists, _ = storage.get_cache(user_id, 'playlists')
     artists, _ = storage.get_cache(user_id, 'followed_artists')
-    progress = musicbrainz.progress_for(user_id)
+    progress = mb_queue.progress_for(user_id)
     return jsonify(playlists=len(playlists) if playlists is not None else None,
                    artists=artists.get('total', 0) if artists is not None else None,
                    tracks=progress['completed'] if progress['total'] else None)

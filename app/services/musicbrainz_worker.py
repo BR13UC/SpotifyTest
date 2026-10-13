@@ -3,7 +3,7 @@
 import time
 
 from app import create_app, storage
-from app.services.musicbrainz import enqueue_rechecks, process_one
+from app.services.mb_queue import enqueue_rechecks, process_one
 from app.services.geography import process_area_one, recover_areas
 
 

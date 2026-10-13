@@ -470,7 +470,7 @@ def test_automatic_spotify_failure_still_queues_musicbrainz(app, monkeypatch):
 
 
 def test_catalogue_backfill_worker_enriches_without_user_token_and_preserves_opinions(app, monkeypatch):
-    from app.services import musicbrainz
+    from app.services import mb_queue, spotify_catalogue
     seed(app)
     with app.app_context(), storage.connect() as db:
         for user in ['alice','bob']:
@@ -483,9 +483,9 @@ def test_catalogue_backfill_worker_enriches_without_user_token_and_preserves_opi
             return {'tracks':[{'uri':'spotify:track:love0','id':'love0','type':'track','name':'Completed',
                                'artists':[{'id':'artist','name':'Artist'}], 'duration_ms':180000,
                                'album':{'release_date':'2020-01-01'}}]}
-    monkeypatch.setattr(musicbrainz,'_spotify_catalogue_client',lambda:Catalogue())
+    monkeypatch.setattr(spotify_catalogue,'_spotify_catalogue_client',lambda:Catalogue())
     queued=[]
-    monkeypatch.setattr(musicbrainz,'enqueue_playlist',lambda user,items:queued.append((user,items)))
+    monkeypatch.setattr(mb_queue,'enqueue_playlist',lambda user,items:queued.append((user,items)))
     with app.app_context():
         data.job('alice','enrich',{'uris':['spotify:track:love0'],'spotify_catalogue':True})
         assert worker.process_one()
