@@ -42,6 +42,7 @@ def browse(path, params, key):
     from app.services import musicbrainz as mb
     items = {}
     offset = 0
+    previous = set()
     while True:
         page = mb.request(path, {**params, 'limit': 100, 'offset': offset})
         entries = page.get(key, [])
