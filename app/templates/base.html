@@ -16,12 +16,11 @@
       <a class="brand" href="{{ url_for('router.home') }}" aria-label="Statify — accueil" data-en-aria-label="Statify — home"><span class="brand-mark" aria-hidden="true">◉</span> Statify</a>
       <button class="mobile-nav-toggle icon-button" type="button" aria-controls="site-nav" aria-expanded="false" data-en-aria-label="Open menu" aria-label="Ouvrir le menu">☰</button>
       <nav id="site-nav" class="site-nav" aria-label="Navigation principale" data-en-aria-label="Main navigation">
-        <a href="{{ url_for('router.home') }}" {% if active_page == 'home' %}aria-current="page"{% endif %} data-en="Home">Accueil</a>
         <a href="{{ url_for('router.sort_page') }}" {% if active_page == 'sorts' %}aria-current="page"{% endif %} data-en="Playlists">Playlists</a>
         <a href="{{ url_for('router.graphs_page') }}" {% if active_page == 'graphs' %}aria-current="page"{% endif %} data-en="Graph">Graphe</a>
         <a href="{{ url_for('router.map_page') }}" {% if active_page == 'map' %}aria-current="page"{% endif %} data-en="Map">Carte</a>
         <a href="{{ url_for('router.timeline_page') }}" {% if active_page == 'timeline' %}aria-current="page"{% endif %} data-en="Timeline">Timeline</a>
-        <a href="{{ url_for('router.progress_page') }}" {% if active_page == 'progress' %}aria-current="page"{% endif %} data-en="Progress">Avancement</a>
+        <a href="{{ url_for('ia.page') }}" {% if active_page == 'ia' %}aria-current="page"{% endif %} data-en="AI">IA</a>
       </nav>
       <div class="header-actions">
         <a class="icon-button settings-link" href="{{ url_for('router.settings_page') }}" {% if active_page == 'settings' %}aria-current="page"{% endif %} aria-label="Paramètres" data-en-aria-label="Settings" title="Paramètres" data-en-title="Settings">⚙</a>
@@ -37,6 +36,7 @@
   </aside>
   <script src="{{ url_for('static', filename='ui.js') }}"></script>
   <script src="{{ url_for('static', filename='script.js') }}"></script>
+  {% if active_page in ['graphs', 'map', 'timeline'] %}<script src="{{ url_for('static', filename='artist_source.js') }}"></script>{% endif %}
   {% block scripts %}{% endblock %}
 </body>
 </html>

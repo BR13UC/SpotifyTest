@@ -7,17 +7,17 @@ router_bp = Blueprint('router', __name__)
 
 @router_bp.route('/')
 def index():
-    return redirect(url_for('router.home') if is_valid_token() else url_for('auth.home'))
+    return redirect(url_for('router.home') if session.get('spotify_user_id') else url_for('auth.home'))
 
 @router_bp.route('/home')
 def home():
-    if not is_valid_token():
+    if not session.get('spotify_user_id'):
         return redirect(url_for('auth.home'))
     return render_template('index.html')
 
 @router_bp.route('/sorts')
 def sort_page():
-    if not is_valid_token():
+    if not session.get('spotify_user_id'):
         return redirect(url_for('auth.home'))
     return render_template('sorts.html')
 
@@ -51,14 +51,14 @@ def progress_page():
 
 @router_bp.route('/settings')
 def settings_page():
-    if not is_valid_token():
+    if not session.get('spotify_user_id'):
         return redirect(url_for('auth.home'))
     return render_template('settings.html')
 
 
 @router_bp.get('/home/summary')
 def home_summary():
-    if not is_valid_token():
+    if not session.get('spotify_user_id'):
         return jsonify(error='Session Spotify expirée. Reconnectez-vous.', error_code='session_expired'), 401
     user_id = session['spotify_user_id']
     playlists, _ = storage.get_cache(user_id, 'playlists')

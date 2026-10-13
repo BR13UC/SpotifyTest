@@ -37,6 +37,7 @@ async function renderCase(artists, catalogues) {
       createElement: tag => new Element(tag),
     },
     window: { addEventListener() {} },
+    clearInterval() {},
     Statify: {
       t: fr => fr,
       openDrawer: title => opened.push(title),
@@ -48,6 +49,12 @@ async function renderCase(artists, catalogues) {
           releases: catalogues[decodeURIComponent(url.split('/')[3])] || [], next_offset: null,
         } : {},
     }),
+  };
+  context.VisualizationSource = {
+    ready: true, generation: 1,
+    controller: { abort() {} },
+    init(callback) { callback(true); },
+    request: async url => (await context.fetch(url)).json(),
   };
   vm.runInNewContext(timelineScript, context);
   for (let i = 0; i < 20 && !elements['timeline-status'].textContent.includes(`${artists.length}/${artists.length}`); i++) {

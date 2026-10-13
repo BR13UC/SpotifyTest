@@ -23,6 +23,10 @@ BASE_URL = "https://musicbrainz.org/ws/2"
 USER_AGENT = "Statify/0.2 (https://github.com/brieucmevel1/SpotifyTest)"
 CACHE_AGE = timedelta(days=30)
 NEGATIVE_CACHE_AGE = timedelta(days=7)
+RECORDING_MATCH_VERSION = 3
+ARTIST_MATCH_VERSION = 2
+DEFERRED_AFTER = 10
+DEFERRED_DELAY = timedelta(hours=24)
 
 
 def _json(value):
@@ -167,8 +171,8 @@ def _artist_candidates(payload):
     name = payload.get("name") or ""
     if not name.strip():
         return []
-    result = request("artist", {"query": f'artist:"{_query_text(name)}"', "limit": 100})
-    return [_candidate(item) for item in result.get("artists", []) if item.get("id")]
+    from app.services.artist_matching import browse
+    return [_candidate(item) for item in browse("artist", {"query": f'artist:"{_query_text(name)}" OR alias:"{_query_text(name)}"'}, "artists")]
 
 
 def _recording_candidates(payload):
@@ -289,6 +293,19 @@ def _spotify_catalogue_client():
     return _spotify_catalogue
 
 
+def _catalogue_albums(spotify_id, **params):
+    """Artist albums from the catalogue client, renewing its token once after a 401."""
+    client = _spotify_catalogue_client()
+    try:
+        return client.artist_albums(spotify_id, **params)
+    except SpotifyException as error:
+        if error.http_status != 401:
+            raise
+        # A token the local clock still deems valid may already be expired for Spotify.
+        client.auth_manager.get_access_token(as_dict=False, check_cache=False)
+        return client.artist_albums(spotify_id, **params)
+
+
 def _spotify_albums(spotify_id):
     cache_key = f"spotify-albums/{spotify_id}"
     with storage.connect() as db:
@@ -299,11 +316,10 @@ def _spotify_albums(spotify_id):
             return albums
     if not current_app.config.get("SPOTIPY_CLIENT_ID") or not current_app.config.get("SPOTIPY_CLIENT_SECRET"):
         return []
-    client = _spotify_catalogue_client()
     albums = []
     try:
         for offset in (0, 10, 20):
-            page = client.artist_albums(spotify_id, album_type="album", limit=10, offset=offset)
+            page = _catalogue_albums(spotify_id, album_type="album", limit=10, offset=offset)
             albums.extend(item.get("name", "") for item in page.get("items", []))
             if not page.get("next"):
                 break
@@ -387,6 +403,47 @@ def _release_match(payload, release, linked):
     return None
 
 
+def _release_rank(payload, release, linked):
+    album_key = _album_key(payload.get("album_name"))
+    title_match = bool(album_key and album_key not in GENERIC_ALBUMS
+                       and album_key == _album_key(release.get("title")))
+    url_match = _release_match(payload, release, linked) == "spotify_album_url"
+    spotify_date, release_date = payload.get("release_date") or "", release.get("date") or ""
+    date_match = 0
+    if url_match or title_match:
+        # Compare only the precision available on both sides (year, month, day).
+        for precision in (4, 7, 10):
+            if min(len(spotify_date), len(release_date)) >= precision:
+                if spotify_date[:precision] != release_date[:precision]:
+                    break
+                date_match = precision
+    group_type = release.get("group_type")
+    album_type = payload.get("album_type")
+    type_match = int((album_type == "album" and group_type == "album") or
+                     (album_type == "single" and group_type in ("single", "ep")))
+    return int(url_match), int(title_match), date_match, type_match
+
+
+def _best_release(payload, releases, linked):
+    matching = [release for release in releases if _release_match(payload, release, linked)]
+    # An explicit final key keeps the selected edition stable across API page orders.
+    return max(matching, key=lambda release: (_release_rank(payload, release, linked),
+                                              release.get("id") or ""), default=None)
+
+
+def _has_isrc(payload, candidate):
+    isrc = (payload.get("isrc") or "").replace("-", "").upper()
+    return bool(isrc and isrc in {(value or "").replace("-", "").upper()
+                                for value in candidate.get("isrcs") or []})
+
+
+def _recording_rank(payload, candidate, release, linked):
+    url_match, title_match, date_match, type_match = _release_rank(payload, release or {}, linked)
+    duration, length = payload.get("duration_ms"), candidate.get("length")
+    duration_match = -abs(duration - length) if duration and length else float("-inf")
+    return url_match, int(_has_isrc(payload, candidate)), title_match, date_match, duration_match, type_match
+
+
 def _recording_score(payload, candidate, releases, linked):
     signals = []
     score = 0
@@ -401,12 +458,11 @@ def _recording_score(payload, candidate, releases, linked):
     score += artist_points
     if artist_points:
         signals.append("artiste crédité")
-    release = next((item for item in releases if _release_match(payload, item, linked)), None)
+    release = _best_release(payload, releases, linked)
     if release:
         score += 25
         signals.append(f"sortie : {release['title']}")
-    isrc = (payload.get("isrc") or "").replace("-", "").upper()
-    if isrc and isrc in {(value or "").replace("-", "").upper() for value in candidate.get("isrcs") or []}:
+    if _has_isrc(payload, candidate):
         score += 10
         signals.append("ISRC")
     duration, length = payload.get("duration_ms"), candidate.get("length")
@@ -425,7 +481,11 @@ def _recording_score(payload, candidate, releases, linked):
 
 
 def _select_recording(payload, candidates, linked):
-    """Confirm through direct identity, exact name, release cascade, then score."""
+    """Prefer direct identity, then compare compatible recordings in API order."""
+    unique = {}
+    for item in candidates:
+        unique.setdefault(item["id"], item)
+    candidates = list(unique.values())
     linked_ids = linked["recordings"]
     if len(linked_ids) == 1:
         linked_id = next(iter(linked_ids))
@@ -440,33 +500,39 @@ def _select_recording(payload, candidates, linked):
                 and (not linked_ids or item["id"] in linked_ids)]
     if len(coherent) == 1 and len(linked_ids) <= 1:
         target = coherent[0]
-        return target["id"], "name" if not payload.get("isrc") else "isrc", {"title": target["name"],
+        return target["id"], "isrc" if _has_isrc(payload, target) else "name", {"title": target["name"],
                 "artist_names": target["artist_names"]}, candidates
     plausible = [item for item in candidates if not linked_ids or item["id"] in linked_ids]
     plausible = [item for item in plausible if _artist_overlap(payload, item) and SequenceMatcher(
         None, _album_key(payload.get("name")), _album_key(item.get("name"))).ratio() >= .85]
-    releases_by_id = {item["id"]: _release_context(item["id"]) for item in plausible[:25]
+    releases_by_id = {item["id"]: _release_context(item["id"]) for item in (coherent or plausible[:25])
                       if payload.get("album_name") or linked["releases"] or linked["groups"]}
-    for group_type, method in (("album", "album"), ("ep", "ep")):
-        found = [(item, release) for item in plausible for release in releases_by_id.get(item["id"], [])
-                 if release["group_type"] == group_type and _release_match(payload, release, linked)
-                 and _recording_coherent(payload, item)]
-        ids = {item["id"] for item, _ in found}
-        if len(ids) == 1:
-            item, release = found[0]
-            return item["id"], method, {"release": release["title"], "release_id": release["id"],
-                                        "release_type": group_type}, candidates
-    spotify_artists = {_album_key(item.get("name")) for item in payload.get("artists") or []}
-    found = [(item, release) for item in plausible for release in releases_by_id.get(item["id"], [])
-             if _release_match(payload, release, linked) and _recording_coherent(payload, item)
-             and release["artist_names"] and
-             (spotify_artists.intersection({_album_key(name) for name in item.get("artist_names") or []}) -
-              {_album_key(name) for name in release["artist_names"]})]
-    ids = {item["id"] for item, _ in found}
-    if len(ids) == 1:
-        item, release = found[0]
-        return item["id"], "contribution", {"release": release["title"], "release_id": release["id"],
-                                              "release_artist_names": release["artist_names"]}, candidates
+    if coherent:
+        releases = {item["id"]: _best_release(payload, releases_by_id.get(item["id"], []), linked)
+                    for item in coherent}
+        # Stable sorting preserves MusicBrainz's first candidate for equal evidence.
+        ordered = sorted(coherent, key=lambda item: _recording_rank(
+            payload, item, releases[item["id"]], linked), reverse=True)
+        target = ordered[0]
+        best_rank = _recording_rank(payload, target, releases[target["id"]], linked)
+        tied = [item for item in ordered if _recording_rank(
+            payload, item, releases[item["id"]], linked) == best_rank]
+        method = "first_candidate" if len(tied) > 1 else "disambiguation"
+        ranked = [_recording_score(payload, item, releases_by_id.get(item["id"], []), linked)
+                  for item in ordered]
+        evidence = {"ranked": ranked, "selected_score": ranked[0]["score"],
+                    "selection": method, "tied_candidates": [item["id"] for item in tied]}
+        release = releases[target["id"]]
+        evidence["criteria"] = {
+            "spotify_album_url": bool(best_rank[0]), "isrc": bool(best_rank[1]),
+            "album_title": bool(best_rank[2]), "release_date": best_rank[3],
+            "duration_delta_ms": -best_rank[4] if best_rank[4] != float("-inf") else None,
+            "album_type": bool(best_rank[5]),
+        }
+        if release:
+            evidence.update(release=release["title"], release_id=release.get("id"),
+                            release_type=release.get("group_type"), release_date=release.get("date"))
+        return target["id"], method, evidence, candidates
     ranked = sorted((_recording_score(payload, item, releases_by_id.get(item["id"], []), linked)
                      for item in candidates), key=lambda item: (-item["score"], item["id"]))
     evidence = {"ranked": ranked, "threshold": 85, "required_margin": 15}
@@ -516,7 +582,7 @@ def claim_job():
         stale = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
         db.execute("UPDATE mb_jobs SET state='queued' WHERE state='processing' AND claimed_at<?", (stale,))
         row = db.execute(
-            "SELECT user_id,kind,spotify_id,attempts FROM mb_jobs WHERE state='queued' AND available_at<=? "
+            "SELECT user_id,kind,spotify_id,attempts FROM mb_jobs WHERE state IN ('queued','deferred') AND available_at<=? "
             "ORDER BY available_at LIMIT 1", (storage.now(),),
         ).fetchone()
         if row:
@@ -530,7 +596,7 @@ def _claim_more_artists(limit=49):
     with storage.connect() as db:
         db.execute("BEGIN IMMEDIATE")
         rows = db.execute("SELECT user_id,kind,spotify_id,attempts FROM mb_jobs "
-                          "WHERE kind='artist' AND state='queued' AND available_at<=? "
+                          "WHERE kind='artist' AND state IN ('queued','deferred') AND available_at<=? "
                           "ORDER BY available_at LIMIT ?", (storage.now(), limit)).fetchall()
         for row in rows:
             db.execute("UPDATE mb_jobs SET state='processing',claimed_at=? "
@@ -557,7 +623,8 @@ def enqueue_rechecks():
     with storage.connect() as db:
         db.execute("UPDATE mb_jobs SET state='queued',claimed_at=NULL WHERE state='processing'")
         rows = db.execute("SELECT user_id,spotify_id,spotify_payload FROM mb_matches "
-                          "WHERE kind='recording' AND status='ambiguous' AND manual=0 AND match_version<2").fetchall()
+                          "WHERE kind='recording' AND status='ambiguous' AND manual=0 AND match_version<?",
+                          (RECORDING_MATCH_VERSION,)).fetchall()
         missing = {(row["user_id"], row["spotify_id"]): row for row in rows}
         if missing:
             for item_row in db.execute("SELECT user_id,payload FROM playlist_items").fetchall():
@@ -575,8 +642,8 @@ def enqueue_rechecks():
         db.execute("INSERT OR IGNORE INTO mb_jobs(user_id,kind,spotify_id,available_at) "
                    "SELECT user_id,kind,spotify_id,? FROM mb_matches "
                    "WHERE status='ambiguous' AND manual=0 AND "
-                   "((kind='artist' AND match_version<1) OR (kind='recording' AND match_version<2))",
-                   (storage.now(),))
+                   "((kind='artist' AND match_version<?) OR (kind='recording' AND match_version<?))",
+                   (storage.now(), ARTIST_MATCH_VERSION, RECORDING_MATCH_VERSION))
 
 
 def _process_job(job, direct_links=None):
@@ -597,23 +664,15 @@ def _process_job(job, direct_links=None):
             status, mbid, candidates = "confirmed", row["mbid"], json.loads(row["candidates"])
             details = _details(job["kind"], mbid)
         else:
-            candidates = (json.loads(row["candidates"]) or _artist_candidates(payload)) if job["kind"] == "artist" else _recording_candidates(payload)
+            artist_linked = (direct_links or {}).get(job["spotify_id"], set()) if job["kind"] == "artist" else set()
+            # A unique direct Spotify link makes the name search for homonyms useless.
+            searched = [] if len(artist_linked) == 1 else _artist_candidates(payload) if job["kind"] == "artist" else None
+            candidates = list({item["id"]: item for item in [*json.loads(row["candidates"]), *searched]}.values()) if job["kind"] == "artist" else _recording_candidates(payload)
             mbid = None
             method, evidence = None, None
             if job["kind"] == "artist":
-                linked = (direct_links or {}).get(job["spotify_id"], set())
-                if len(linked) == 1:
-                    linked_mbid = next(iter(linked))
-                    if any(candidate["id"] == linked_mbid for candidate in candidates):
-                        mbid, method = linked_mbid, "spotify_url"
-                        evidence = {"spotify_url": _spotify_url(job["spotify_id"])}
-                if not mbid:
-                    exact = [candidate for candidate in candidates if _fold(candidate["name"]) == _fold(payload.get("name"))]
-                    if len(exact) == 1:
-                        comparison = album_comparison(job["spotify_id"], exact[0]["id"])
-                        if len({_album_key(title) for title in comparison["common_albums"]}) >= 2:
-                            mbid, method = exact[0]["id"], "albums"
-                            evidence = {"common_albums": comparison["common_albums"]}
+                from app.services.artist_matching import analyze
+                mbid, method, evidence, candidates = analyze(job["user_id"], payload, candidates, artist_linked)
             else:
                 linked = (direct_links or {}).get((job["user_id"], job["spotify_id"]),
                                                   {"recordings": set(), "releases": set(), "groups": set()})
@@ -631,7 +690,7 @@ def _process_job(job, direct_links=None):
                     "UPDATE mb_matches SET status=?,mbid=?,candidates=?,enriched=?,match_method=?,match_evidence=?,match_version=?,updated_at=? "
                     "WHERE user_id=? AND kind=? AND spotify_id=?",
                     (status, mbid, _json(candidates), _json(details) if details else None,
-                     method, _json(evidence) if evidence else None, 2 if job["kind"] == "recording" else 1,
+                     method, _json(evidence) if evidence else None, RECORDING_MATCH_VERSION if job["kind"] == "recording" else ARTIST_MATCH_VERSION,
                      storage.now(), *key),
                 )
             elif latest and latest["status"] == "not_found":
@@ -643,8 +702,17 @@ def _process_job(job, direct_links=None):
             if latest and latest["manual"] and latest["status"] != "not_found" and latest["mbid"] != selected_mbid:
                 db.execute("UPDATE mb_jobs SET state='queued',available_at=?,claimed_at=NULL "
                            "WHERE user_id=? AND kind=? AND spotify_id=?", (storage.now(), *key))
+            elif job["kind"] == "artist" and evidence and not evidence.get("complete", True) and not (latest and latest["manual"]):
+                attempts = job.get("attempts", 0) + 1
+                # Repeatedly incomplete analyses move to a daily lane instead of hogging the rate limit.
+                deferred = attempts >= DEFERRED_AFTER
+                delay = DEFERRED_DELAY if deferred else timedelta(seconds=min(3600, 30 * 2 ** min(attempts, 7)))
+                retry = (datetime.now(timezone.utc) + delay).isoformat()
+                db.execute("UPDATE mb_jobs SET state=?,attempts=?,available_at=?,claimed_at=NULL WHERE user_id=? AND kind=? AND spotify_id=?",
+                           ("deferred" if deferred else "queued", attempts, retry, *key))
             else:
                 db.execute("DELETE FROM mb_jobs WHERE user_id=? AND kind=? AND spotify_id=?", key)
+            _record_attempt(db, job, failed=bool(job["kind"] == "artist" and evidence and not evidence.get("complete", True)))
     except (TemporaryFailure, HTTPError, ValueError, KeyError, sqlite3.OperationalError) as error:
         current_app.logger.warning("MusicBrainz job delayed: %s", error)
         _delay_job(job)
@@ -681,9 +749,30 @@ def _delay_job(job):
     delay = min(3600, 2 ** min(job["attempts"] + 1, 10))
     available = (datetime.now(timezone.utc) + timedelta(seconds=delay)).isoformat()
     with storage.connect() as db:
-        db.execute("UPDATE mb_jobs SET state='queued',available_at=?,attempts=attempts+1,claimed_at=NULL "
+        updated = db.execute("UPDATE mb_jobs SET state='queued',available_at=?,attempts=attempts+1,claimed_at=NULL "
                    "WHERE user_id=? AND kind=? AND spotify_id=?",
                    (available, job["user_id"], job["kind"], job["spotify_id"]))
+        if updated.rowcount:
+            _record_attempt(db, job, failed=True)
+
+
+def _record_attempt(db, job, failed):
+    """Persist per-account, per-kind outcomes in the job's existing transaction."""
+    row = db.execute("SELECT payload FROM cache_entries WHERE user_id=? "
+                     "AND resource='musicbrainz_attempt_stats' AND cache_key=?",
+                     (job["user_id"], job["kind"])).fetchone()
+    stats = json.loads(row["payload"]) if row else {"attempts": 0, "failed": 0, "since": storage.now()}
+    stats["attempts"] += 1
+    stats["failed"] += int(failed)
+    db.execute("INSERT INTO cache_entries VALUES (?, 'musicbrainz_attempt_stats', ?, ?, ?) "
+               "ON CONFLICT(user_id,resource,cache_key) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at",
+               (job["user_id"], job["kind"], _json(stats), storage.now()))
+
+
+def error_stats(user_id, kind):
+    stats, _ = storage.get_cache(user_id, "musicbrainz_attempt_stats", kind)
+    stats = stats or {"attempts": 0, "failed": 0, "since": None}
+    return {**stats, "percent": round(100 * stats["failed"] / stats["attempts"], 1) if stats["attempts"] else None}
 
 
 def _row_dict(row):
@@ -737,7 +826,7 @@ def status_for(user_id):
 
 def progress_for(user_id, kind="recording"):
     """Progress of the current matcher over loaded entities for this account."""
-    version = 2 if kind == "recording" else 1
+    version = RECORDING_MATCH_VERSION if kind == "recording" else ARTIST_MATCH_VERSION
     with storage.connect() as db:
         row = db.execute(
             "SELECT COUNT(*) AS total, "
@@ -747,12 +836,22 @@ def progress_for(user_id, kind="recording"):
             "COALESCE(SUM(CASE WHEN m.status='confirmed' THEN 1 ELSE 0 END),0) AS confirmed, "
             "COALESCE(SUM(CASE WHEN m.status='ambiguous' AND m.match_version>=? THEN 1 ELSE 0 END),0) AS reviews, "
             "COALESCE(SUM(CASE WHEN m.status='not_found' THEN 1 ELSE 0 END),0) AS not_found, "
-            "COALESCE(SUM(CASE WHEN j.spotify_id IS NOT NULL THEN 1 ELSE 0 END),0) AS queued "
+            "COALESCE(SUM(CASE WHEN j.spotify_id IS NOT NULL AND j.state!='deferred' THEN 1 ELSE 0 END),0) AS queued, "
+            "COALESCE(SUM(CASE WHEN j.state='deferred' THEN 1 ELSE 0 END),0) AS deferred "
             "FROM mb_matches AS m LEFT JOIN mb_jobs AS j "
             "ON j.user_id=m.user_id AND j.kind=m.kind AND j.spotify_id=m.spotify_id "
             "WHERE m.user_id=? AND m.kind=?", (version, version, user_id, kind)
         ).fetchone()
-    return dict(row)
+    result = {**dict(row), "errors": error_stats(user_id, kind)}
+    if kind == 'artist':
+        with storage.connect() as db:
+            active = db.execute("SELECT c.payload FROM cache_entries c JOIN mb_jobs j "
+                                "ON j.user_id=c.user_id AND j.spotify_id=c.cache_key AND j.kind='artist' "
+                                "WHERE c.user_id=? AND c.resource='artist_score_progress' AND j.state='processing' "
+                                "AND c.updated_at>=j.claimed_at ORDER BY c.updated_at DESC LIMIT 1", (user_id,)).fetchone()
+        if active:
+            result['analysis'] = json.loads(active['payload'])
+    return result
 
 
 def reviews_for(user_id, limit=None, offset=0, kind=None):

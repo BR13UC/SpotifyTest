@@ -26,9 +26,14 @@ function showProgress(kind, data) {
     document.getElementById(`progress-count-${kind}`).textContent = total
         ? Statify.t(`${completed} ${noun}${completed > 1 ? 's' : ''} traité${completed > 1 ? 's' : ''} sur ${total}`, `${completed} of ${total} ${kind === 'artist' ? 'artists' : 'tracks'} processed`)
         : Statify.t(`Aucun ${noun} chargé pour le moment.`, `No ${kind === 'artist' ? 'artists' : 'tracks'} loaded yet.`);
-    for (const field of ['confirmed', 'reviews', 'not_found', 'queued']) {
-        document.getElementById(`progress-${field}-${kind}`).textContent = data[field];
+    for (const field of ['confirmed', 'reviews', 'not_found', 'queued', 'deferred']) {
+        document.getElementById(`progress-${field.replace('_', '-')}-${kind}`).textContent = data[field] || 0;
     }
+    const errors = data.errors || { attempts: 0 };
+    document.getElementById(`progress-errors-${kind}`).textContent = errors.attempts
+        ? Statify.t(`Taux d’erreur : ${errors.percent} % · ${errors.failed}/${errors.attempts} tentatives d’analyse échouées.`,
+            `Error rate: ${errors.percent}% · ${errors.failed}/${errors.attempts} analysis attempts failed.`)
+        : Statify.t('Taux d’erreur : — · aucune tentative mesurée.', 'Error rate: — · no attempts measured.');
     const state = document.getElementById(`progress-state-${kind}`);
     if (!total) {
         state.textContent = kind === 'artist'
@@ -40,8 +45,17 @@ function showProgress(kind, data) {
             : Statify.t('Analyse terminée. Aucune vérification manuelle nécessaire.', 'Analysis complete. No manual review needed.');
     } else if (data.queued) {
         state.textContent = Statify.t(`${total - completed} ${noun}${total - completed > 1 ? 's' : ''} à traiter ; ${data.queued} tâche${data.queued > 1 ? 's' : ''} dans la file.`, `${total - completed} ${kind === 'artist' ? 'artists' : 'tracks'} to process; ${data.queued} tasks queued.`);
-    } else {
+    } else if (!data.deferred) {
         state.textContent = Statify.t('Analyse en attente. Le traitement reprendra quand le processus MusicBrainz sera actif.', 'Analysis is waiting. Processing will resume when the MusicBrainz worker is active.');
+    }
+    if (data.deferred && completed < total) {
+        const text = Statify.t(`${data.deferred} reporté${data.deferred > 1 ? 's' : ''} de 24 h.`, `${data.deferred} deferred for 24 h.`);
+        state.textContent = data.queued ? `${state.textContent} ${text}` : text;
+    }
+    if (kind === 'artist' && data.analysis) {
+        const analysis = data.analysis;
+        const phases = { tracks: Statify.t('titres comparés', 'tracks compared'), catalogue: Statify.t('chargement du catalogue Spotify', 'loading Spotify catalogue'), candidates: Statify.t('candidats évalués', 'candidates assessed') };
+        state.textContent += ` ${analysis.name || ''} : ${phases[analysis.phase] || ''}${analysis.phase === 'catalogue' ? '' : ` · ${analysis.done}/${analysis.total}`}${analysis.candidate ? ` · ${analysis.candidate}` : ''}.`;
     }
 }
 

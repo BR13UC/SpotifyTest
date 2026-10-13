@@ -6,7 +6,8 @@ const familyLabel = family => {
     return ({ Electronic: 'Électronique', Rock: 'Rock', Pop: 'Pop', 'Hip-Hop': 'Hip-hop', Jazz: 'Jazz',
         'Funk / Soul': 'Funk / Soul', Classical: 'Classique', Blues: 'Blues',
         'Folk, World, & Country': 'Folk, musiques du monde et country', Latin: 'Latino',
-        Reggae: 'Reggae', 'Brass & Military': 'Cuivres et musique militaire',
+        Reggae: 'Reggae', African: 'Africain', 'East Asian Pop': 'Pop est-asiatique', Experimental: 'Expérimental',
+        'Brass & Military': 'Cuivres et musique militaire',
         'Stage & Screen': 'Scène et écran', "Children's": 'Musique pour enfants', 'Non-Music': 'Non musical' })[family] || 'Non classé';
 };
 
@@ -14,7 +15,7 @@ async function fetchJson(url, options = {}) {
     const response = await fetch(url, options);
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-        const error = new Error(Statify.translateError(data.error, data.error_code) || `HTTP ${response.status}`);
+        const error = new Error((Statify.locale() === 'en' && data.error_en) || Statify.translateError(data.error, data.error_code) || `HTTP ${response.status}`);
         error.details = data;
         throw error;
     }
@@ -53,7 +54,9 @@ function renderMatch(parent, match, label) {
     appendText(box, 'strong', `${label} — ${status}`);
     const method = { spotify_url: T('lien Spotify vérifié', 'verified Spotify link'), albums: T('deux albums concordants', 'two matching albums'), manual: T('choix manuel', 'manual choice'),
         isrc: T('titre et artiste uniques via ISRC', 'unique track and artist via ISRC'), name: T('titre et artiste uniques', 'unique track and artist'), album: T('titre sur un album', 'track on an album'),
-        ep: T('titre sur un EP', 'track on an EP'), contribution: T('participation créditée', 'credited contribution'), score: T('score de confiance', 'confidence score') }[match.match_method];
+        ep: T('titre sur un EP', 'track on an EP'), contribution: T('participation créditée', 'credited contribution'), score: T('force des indices', 'evidence strength'),
+        disambiguation: T('candidats départagés par les indices disponibles', 'candidates distinguished using available evidence'),
+        first_candidate: T('premier candidat compatible, indices à égalité', 'first compatible candidate, tied evidence') }[match.match_method];
     if (method) appendText(box, 'p', T(`Correspondance : ${method}.`, `Match: ${method}.`));
     if (match.match_evidence?.common_albums?.length) appendText(box, 'p', T(`Albums communs : ${match.match_evidence.common_albums.join(', ')}`, `Albums in common: ${match.match_evidence.common_albums.join(', ')}`));
     if (match.match_evidence?.release) appendText(box, 'p', T(`Sortie concordante : ${match.match_evidence.release}.`, `Matching release: ${match.match_evidence.release}.`));
@@ -62,6 +65,7 @@ function renderMatch(parent, match, label) {
         const ranked = match.match_evidence.ranked;
         appendText(box, 'p', T(`Score : ${ranked[0].score}/100${ranked.length > 1 ? ` · deuxième : ${ranked[1].score}/100` : ''}.`, `Score: ${ranked[0].score}/100${ranked.length > 1 ? ` · second: ${ranked[1].score}/100` : ''}.`));
     }
+    if (match.kind === 'artist' && match.match_evidence?.ranked) appendText(box, 'p', T('Le score mesure la force des indices, pas une probabilité. Confirmation : 85/100, 15 points d’avance et deux enregistrements distincts, ou identité directe unique ; analyse complète requise.', 'The score measures evidence strength, not probability. Confirmation: 85/100, a 15-point lead and two distinct recordings, or a unique direct identity; complete analysis required.'));
     const data = match.enriched;
     if (data) {
         if (data.dates?.begin) appendText(box, 'p', T(`Début : ${data.dates.begin} (MusicBrainz)`, `Start: ${data.dates.begin} (MusicBrainz)`));
@@ -95,12 +99,12 @@ function renderMatch(parent, match, label) {
         }
         appendText(choices, 'h4', 'MusicBrainz');
         const candidates = [...(match.candidates || [])];
-        if (match.kind === 'recording' && match.match_evidence?.ranked) {
-            const scores = new Map(match.match_evidence.ranked.map(item => [item.id, item.score]));
-            candidates.sort((a, b) => (scores.get(b.id) || 0) - (scores.get(a.id) || 0));
+        if (match.match_evidence?.ranked) {
+            const positions = new Map(match.match_evidence.ranked.map((item, index) => [item.id, index]));
+            candidates.sort((a, b) => (positions.get(a.id) ?? Infinity) - (positions.get(b.id) ?? Infinity));
         }
-        const exact = candidates.filter(candidate => sameArtistName(candidate.name, match.spotify.name));
-        const others = candidates.filter(candidate => !sameArtistName(candidate.name, match.spotify.name));
+        const exact = match.kind === 'artist' && match.match_evidence?.ranked ? candidates : candidates.filter(candidate => sameArtistName(candidate.name, match.spotify.name));
+        const others = match.kind === 'artist' && match.match_evidence?.ranked ? [] : candidates.filter(candidate => !sameArtistName(candidate.name, match.spotify.name));
         const message = appendText(box, 'p', '');
         const renderCandidate = (target, candidate) => {
             const card = document.createElement('div');
@@ -108,6 +112,38 @@ function renderMatch(parent, match, label) {
             appendText(card, 'strong', candidate.name);
             const context = [candidate.disambiguation, candidate.type, candidate.area].filter(Boolean).join(' · ');
             if (context) appendText(card, 'p', context);
+            if (match.kind === 'artist') {
+                const assessment = match.match_evidence?.ranked?.find(item => item.id === candidate.id);
+                if (assessment) {
+                    const complete = assessment.complete && match.match_evidence.complete !== false;
+                    appendText(card, 'p', T(`Force des indices : ${assessment.score}/100${complete ? '' : ' · provisoire'}`, `Evidence strength: ${assessment.score}/100${complete ? '' : ' · provisional'}`));
+                    const families = { recordings: T('Titres et crédits', 'Tracks and credits'), discography: T('Discographie', 'Discography'), name: T('Nom et alias', 'Name and aliases'), context: T('Contexte', 'Context') };
+                    if (assessment.direct) appendText(card, 'p', T('Identité directe vérifiée : 100 points', 'Verified direct identity: 100 points'));
+                    else appendText(card, 'p', Object.entries(assessment.families || {}).map(([key, value]) => `${families[key] || key} : ${value}`).join(' · '));
+                    const kinds = { identity: T('Identité', 'Identity'), name: T('Nom ou alias', 'Name or alias'), isrc: 'ISRC', recording: T('Titre et crédits', 'Track and credits'), release: T('Sortie', 'Release'), collaboration: T('Collaboration', 'Collaboration'), date: T('Date', 'Date') };
+                    const proofs = document.createElement('details');
+                    appendText(proofs, 'summary', T(`Preuves (${assessment.evidence.length})`, `Evidence (${assessment.evidence.length})`));
+                    for (const proof of assessment.evidence) {
+                        const line = appendText(proofs, 'p', `${kinds[proof.kind] || proof.kind} · ${proof.label || ''} · ${proof.points} pts `);
+                        const url = new URL(proof.url);
+                        if (['http:', 'https:'].includes(url.protocol)) {
+                            const link = appendText(line, 'a', T('Source', 'Source'));
+                            link.href = url.href; link.target = '_blank'; link.rel = 'noopener noreferrer';
+                        }
+                    }
+                    card.appendChild(proofs);
+                    const flags = { isrc_title: T('ISRC commun mais titres différents : à examiner', 'Shared ISRC but different titles: review required'), other_spotify: T('Autre profil Spotify associé : à examiner', 'Another associated Spotify profile: review required'), site_unavailable: T('Site officiel indisponible', 'Official website unavailable'), official_other_identity: T('Le site officiel renvoie vers une autre identité Spotify', 'Official website links to a different Spotify identity') };
+                    for (const flag of [...(assessment.conflicts || []), ...(assessment.warnings || [])]) {
+                        const line = appendText(card, 'p', flags[flag.kind] || flag.kind);
+                        if (flag.url && /^https?:\/\//.test(flag.url)) {
+                            const link = appendText(line, 'a', T(' · Source', ' · Source'));
+                            link.href = flag.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+                        }
+                    }
+                    const missing = { tracks: T('titres de tes collections', 'collection tracks'), spotify_catalogue: T('catalogue Spotify', 'Spotify catalogue'), aliases: T('pseudonymes documentés', 'documented aliases'), incomplete: T('analyse complète', 'complete analysis') };
+                    if (assessment.missing?.length) appendText(card, 'p', T('Données manquantes : ', 'Missing data: ') + [...new Set(assessment.missing)].map(key => missing[key] || key).join(', '));
+                }
+            }
             if (match.kind === 'recording') {
                 if (candidate.artist_names?.length) appendText(card, 'p', T(`Artistes : ${candidate.artist_names.join(', ')}`, `Artists: ${candidate.artist_names.join(', ')}`));
                 if (candidate.length) appendText(card, 'p', T(`Durée : ${formatDuration(candidate.length)}`, `Length: ${formatDuration(candidate.length)}`));
@@ -125,15 +161,16 @@ function renderMatch(parent, match, label) {
             if (match.kind === 'artist') {
                 const albums = document.createElement('button');
                 albums.type = 'button';
-                albums.textContent = T('Comparer les albums', 'Compare albums');
+                albums.textContent = T('Comparer titres et sorties', 'Compare tracks and releases');
                 const result = appendText(card, 'div', '');
                 albums.addEventListener('click', async () => {
                     albums.disabled = true;
-                    result.textContent = T('Chargement des albums…', 'Loading albums…');
+                    result.textContent = T('Chargement de la comparaison…', 'Loading comparison…');
                     try {
                         const data = await fetchJson(`/musicbrainz/comparison/artist/${encodeURIComponent(match.spotify_id)}/${encodeURIComponent(candidate.id)}`);
                         result.replaceChildren();
-                        appendText(result, 'p', T(`Albums communs : ${data.common_albums.join(', ') || 'aucun'}`, `Albums in common: ${data.common_albums.join(', ') || 'none'}`));
+                        appendText(result, 'p', T(`Sorties communes : ${data.common_albums.join(', ') || 'aucun'}`, `Releases in common: ${data.common_albums.join(', ') || 'none'}`));
+                        if (data.matched_tracks?.length) appendText(result, 'p', T(`Titres concordants : ${data.matched_tracks.join(', ')}`, `Matching tracks: ${data.matched_tracks.join(', ')}`));
                         appendText(result, 'p', `Spotify : ${data.spotify_albums.join(', ') || T('aucun album disponible', 'no albums available')}`);
                         appendText(result, 'p', `MusicBrainz : ${data.musicbrainz_albums.join(', ') || T('aucun album disponible', 'no albums available')}`);
                     } catch (error) { result.textContent = error.message; }
@@ -210,8 +247,11 @@ const MusicBrainzPanel = {
     previousRevision: undefined,
     onChange: null,
     async refresh() {
+        if (window.VisualizationSource && !VisualizationSource.ready) return;
         try {
-            const data = await fetchJson('/musicbrainz/status');
+            const data = window.VisualizationSource
+                ? await VisualizationSource.request('/musicbrainz/status')
+                : await fetchJson('/musicbrainz/status');
             const counts = data.counts;
             if (counts.revision !== this.previousRevision) {
                 this.previousRevision = counts.revision;
@@ -232,7 +272,7 @@ async function loadProfile() {
     const target = document.querySelector('.profile');
     if (!target) return;
     try {
-        const profile = await fetchJson('/users/get_profile');
+        const profile = await fetchJson('/ia/api/profile');
         target.replaceChildren();
         const imageUrl = profile.images?.[0]?.url;
         if (imageUrl) {
@@ -381,7 +421,7 @@ const SortsPage = {
             if (item.release_date && /^\d{4}/.test(item.release_date)) {
                 const link = appendText(content, 'a', T('Voir cette année dans le graphe', 'View this year in the graph'));
                 link.className = 'button button-quiet';
-                link.href = Statify.contextualLink('/graphs', { mode: 'release_years', playlist: document.getElementById('playlist-select').value, year: item.release_date.slice(0, 4) });
+                link.href = Statify.contextualLink('/graphs', { mode: 'release_years', source: 'playlist', playlist_id: document.getElementById('playlist-select').value, year: item.release_date.slice(0, 4) });
             }
             if (enrichment?.genres?.length) {
                 appendText(content, 'h3', T('Genres et sources', 'Genres and sources'));
@@ -438,6 +478,7 @@ const SortsPage = {
 };
 
 const GraphPage = {
+    graphToken: 0,
     data: null,
     likedCounts: null,
     maxLikedCount: 1,
@@ -451,7 +492,6 @@ const GraphPage = {
     nodeMap: new Map(),
     genreEdges: new Map(),
     initialPositions: new Map(),
-    layoutTimer: null,
     cameraInitialized: false,
     loading: false,
     selectionToken: 0,
@@ -464,11 +504,10 @@ const GraphPage = {
         if (stage === 'graph') document.getElementById('graph-container').setAttribute('aria-busy', String(active));
     },
     async init() {
-        const status = document.getElementById('graph-status');
         document.getElementById('create-graph-btn').addEventListener('click', () => this.loadGraph(false, true));
         document.getElementById('graph-overview-btn').addEventListener('click', () => this.network?.fit({ animation: false }));
         document.getElementById('export-graphml').addEventListener('click', () => {
-            window.location.href = '/graphs/export_graph/graphml';
+            if (VisualizationSource.ready) window.location.href = VisualizationSource.url('/graphs/export_graph/graphml');
         });
         document.getElementById('graph-genre').addEventListener('change', () => {
             document.getElementById('graph-select-genre').disabled = !document.getElementById('graph-genre').value;
@@ -491,27 +530,50 @@ const GraphPage = {
         MusicBrainzPanel.start(({ counts }) => {
             if (this.data && counts.artist_revision !== this.data.revision) this.loadGraph(true);
         });
-        try {
-            this.setLoading('graph', true);
-            showMessage(status, T('Chargement des artistes suivis…', 'Loading followed artists…'));
-            const artists = await fetchJson('/users/get_followed_artists');
-            showMessage(status, T(`${artists.total} artistes suivis. Préparation du graphe…`, `${artists.total} followed artists. Preparing graph…`));
-            await this.loadGraph();
-        } catch (error) {
-            showMessage(status, error.message);
-        } finally {
-            this.setLoading('graph', false);
-        }
+    },
+    resetSource() {
+        ++this.graphToken;
+        ++this.likesToken;
+        ++this.selectionToken;
+        ++this.paintToken;
+        this.loading = false;
+        this.data = null;
+        this.likedCounts = null;
+        this.selectedNodeId = null;
+        this.cameraInitialized = false;
+        this.nodeMap = new Map();
+        this.genreEdges = new Map();
+        this.renderedNodes.clear();
+        this.renderedEdges.clear();
+        this.network?.destroy();
+        this.network = null;
+        this.nodeSet = null;
+        this.edgeSet = null;
+        document.getElementById('graph-search').value = '';
+        document.getElementById('graph-genre').replaceChildren(new Option(T('Tous les genres', 'All genres'), ''));
+        document.getElementById('graph-select-genre').disabled = true;
+        document.getElementById('graph-family-legend').replaceChildren();
+        document.getElementById('graph-status').textContent = '';
+        document.getElementById('graph-likes-status').textContent = '';
+        this.setLoading('graph', false);
+        this.setLoading('likes', false);
     },
     async loadGraph(refresh = false, refreshLikes = false) {
-        if (this.loading) return;
+        if (this.loading || !VisualizationSource.ready) return;
+        const token = ++this.graphToken;
         this.loading = true;
         this.setLoading('graph', true);
         const status = document.getElementById('graph-status');
         if (!refresh) showMessage(status, T('Chargement du graphe…', 'Loading graph…'));
         const started = performance.now();
         try {
-            const data = await fetchJson('/graphs/get_artist_genre_graph_data');
+            if (refreshLikes && VisualizationSource.source === 'liked') {
+                await VisualizationSource.request('/graphs/liked_artist_counts', { refresh: '1' });
+                await VisualizationSource.request('/users/artist_collection');
+                refreshLikes = false;
+            }
+            const data = await VisualizationSource.request('/graphs/get_artist_genre_graph_data');
+            if (token !== this.graphToken) return;
             const apiMs = performance.now() - started;
             this.apiMs = apiMs;
             this.loadStartedAt = started;
@@ -541,13 +603,15 @@ const GraphPage = {
             if (requested && this.nodeMap.has(requested) && !this.selectedNodeId) this.selectNode(requested);
             showMessage(status, data.nodes.length
                 ? T(`${data.nodes.filter(node => node.group === 'artist').length} artistes · ${this.genreEdges.size} genres · ${data.edges.length} liens${refresh ? ' · données actualisées' : ''}.${this.networkUnavailable ? ' Moteur du graphe indisponible.' : ''}`, `${data.nodes.filter(node => node.group === 'artist').length} artists · ${this.genreEdges.size} genres · ${data.edges.length} links${refresh ? ' · updated' : ''}.${this.networkUnavailable ? ' Graph engine unavailable.' : ''}`)
-                : T('Aucun artiste suivi à afficher.', 'No followed artists to show.'));
+                : T('Aucun artiste à afficher dans cette source.', 'No artists to show in this source.'));
             if (data.nodes.length) this.loadLikedCounts(refreshLikes);
         } catch (error) {
-            showMessage(status, error.message);
+            if (token === this.graphToken && error.name !== 'AbortError') showMessage(status, error.message);
         } finally {
-            this.loading = false;
-            this.setLoading('graph', false);
+            if (token === this.graphToken) {
+                this.loading = false;
+                this.setLoading('graph', false);
+            }
         }
     },
     async loadLikedCounts(force = false) {
@@ -556,7 +620,7 @@ const GraphPage = {
         this.setLoading('likes', true);
         showMessage(status, T('Chargement des titres likés…', 'Loading liked tracks…'));
         try {
-            const result = await fetchJson(`/graphs/liked_artist_counts${force ? '?refresh=1' : ''}`);
+            const result = await VisualizationSource.request('/graphs/liked_artist_counts', force ? { refresh: '1' } : {});
             if (token !== this.likesToken) return;
             this.likedCounts = result.counts;
             this.maxLikedCount = Math.max(1, ...this.data.nodes.filter(node => node.group === 'artist').map(node => result.counts[node.id.slice(7)] || 0));
@@ -600,23 +664,53 @@ const GraphPage = {
         const count = this.likedCounts?.[node.id.slice(7)] || 0;
         return 10 + 18 * Math.log1p(count) / Math.log1p(this.maxLikedCount);
     },
+    layoutRadius(node) {
+        return node.group === 'genre'
+            ? 24 + 14 * Math.sqrt(Math.max(1, node.artist_count || 0))
+            : 18;
+    },
     layoutPositions(nodes, edges) {
         const positions = new Map();
         const genres = nodes.filter(node => node.group === 'genre');
-        const families = [...new Set(genres.map(node => node.family || 'Non classé'))].sort();
-        const radius = Math.max(450, families.length * 130);
-        const byFamily = new Map(families.map(family => [family, []]));
-        for (const genre of genres) byFamily.get(genre.family || 'Non classé').push(genre);
-        families.forEach((family, index) => {
-            const angle = 2 * Math.PI * index / families.length;
-            const centerX = radius * Math.cos(angle);
-            const centerY = radius * Math.sin(angle);
-            byFamily.get(family).sort((left, right) => left.id.localeCompare(right.id)).forEach((genre, rank) => {
-                const localAngle = rank * 2.399963229728653;
-                const localRadius = 75 * Math.sqrt(rank);
-                positions.set(genre.id, {
-                    x: centerX + localRadius * Math.cos(localAngle),
-                    y: centerY + localRadius * Math.sin(localAngle),
+        if (!genres.length) return positions;
+        const byFamily = new Map();
+        for (const genre of genres) {
+            const family = genre.family || 'Non classé';
+            const cluster = genre.cluster || family;
+            if (!byFamily.has(family)) byFamily.set(family, new Map());
+            const clusters = byFamily.get(family);
+            if (!clusters.has(cluster)) clusters.set(cluster, []);
+            clusters.get(cluster).push(genre);
+        }
+        const families = [...byFamily.entries()].map(([name, clusterMap]) => {
+            const clusters = [...clusterMap.entries()].map(([cluster, items]) => ({
+                name: cluster, items,
+                weight: items.reduce((sum, item) => sum + Math.max(1, item.artist_count || 0), 0),
+            })).sort((left, right) => right.weight - left.weight || left.name.localeCompare(right.name));
+            return { name, clusters, weight: clusters.reduce((sum, cluster) => sum + cluster.weight, 0) };
+        }).sort((left, right) => right.weight - left.weight || left.name.localeCompare(right.name));
+        const maximumWeight = Math.max(...families.map(family => family.weight));
+        families.forEach((family, familyRank) => {
+            const angle = (familyRank - 1) * 2.399963229728653 - Math.PI / 2;
+            const weightGap = Math.log1p(maximumWeight) - Math.log1p(family.weight);
+            const center = familyRank === 0 ? { x: 0, y: 0 } : {
+                x: (340 + 64 * Math.sqrt(familyRank) + 46 * weightGap) * Math.cos(angle),
+                y: (235 + 46 * Math.sqrt(familyRank) + 34 * weightGap) * Math.sin(angle),
+            };
+            family.clusters.forEach((cluster, clusterRank) => {
+                const clusterAngle = clusterRank * 2.399963229728653;
+                const clusterRadius = clusterRank === 0 ? 0 : 128 + 68 * Math.sqrt(clusterRank);
+                const clusterCenter = {
+                    x: center.x + clusterRadius * Math.cos(clusterAngle),
+                    y: center.y + clusterRadius * Math.sin(clusterAngle),
+                };
+                cluster.items.sort((left, right) => (right.artist_count || 0) - (left.artist_count || 0) || left.id.localeCompare(right.id)).forEach((genre, rank) => {
+                    const localAngle = rank * 2.399963229728653;
+                    const localRadius = rank === 0 ? 0 : 74 * Math.sqrt(rank) + this.layoutRadius(genre);
+                    positions.set(genre.id, {
+                        x: clusterCenter.x + localRadius * Math.cos(localAngle),
+                        y: clusterCenter.y + localRadius * Math.sin(localAngle),
+                    });
                 });
             });
         });
@@ -629,22 +723,84 @@ const GraphPage = {
         }
         const ranks = new Map();
         nodes.filter(node => node.group === 'artist').sort((left, right) => left.id.localeCompare(right.id)).forEach(artist => {
-            const linked = [...new Set(neighbors.get(artist.id) || [])].sort();
+            const linked = [...new Set(neighbors.get(artist.id) || [])].sort((left, right) => {
+                const leftDegree = nodes.find(node => node.id === left)?.artist_count || 0;
+                const rightDegree = nodes.find(node => node.id === right)?.artist_count || 0;
+                return rightDegree - leftDegree || left.localeCompare(right);
+            });
             const signature = linked.join('|');
             const rank = ranks.get(signature) || 0;
             ranks.set(signature, rank + 1);
-            const center = linked.length ? linked.reduce((sum, id) => {
+            const centroid = linked.length ? linked.reduce((sum, id) => {
                 const point = positions.get(id);
                 return { x: sum.x + point.x, y: sum.y + point.y };
             }, { x: 0, y: 0 }) : { x: 0, y: 0 };
+            const home = linked.length ? positions.get(linked[0]) : { x: 0, y: 0 };
+            const blend = linked.length > 1 ? 0.28 : 0;
+            const center = {
+                x: home.x * (1 - blend) + centroid.x / (linked.length || 1) * blend,
+                y: home.y * (1 - blend) + centroid.y / (linked.length || 1) * blend,
+            };
             const angle = rank * 2.399963229728653;
-            const distance = 65 * Math.sqrt(rank + 1);
+            const distance = 105 + 64 * Math.sqrt(rank);
             positions.set(artist.id, {
-                x: center.x / (linked.length || 1) + distance * Math.cos(angle),
-                y: center.y / (linked.length || 1) + distance * Math.sin(angle),
+                x: center.x + distance * Math.cos(angle),
+                y: center.y + distance * Math.sin(angle),
             });
         });
+        // Keep the family geometry fixed while moving artists just enough to avoid overlaps.
+        const artists = nodes.filter(node => node.group === 'artist').sort((left, right) => left.id.localeCompare(right.id));
+        for (let iteration = 0; iteration < 14; iteration += 1) {
+            for (const artist of artists) {
+                const point = positions.get(artist.id);
+                let shiftX = 0;
+                let shiftY = 0;
+                for (const other of nodes) {
+                    if (other.id === artist.id) continue;
+                    const otherPoint = positions.get(other.id);
+                    const dx = point.x - otherPoint.x;
+                    const dy = point.y - otherPoint.y;
+                    const distance = Math.hypot(dx, dy) || 0.001;
+                    const minimum = this.layoutRadius(artist) + this.layoutRadius(other) + 28;
+                    if (distance >= minimum) continue;
+                    const push = (minimum - distance) / minimum;
+                    const direction = distance === 0.001
+                        ? { x: Math.cos(iteration + artist.id.length), y: Math.sin(iteration + artist.id.length) }
+                        : { x: dx / distance, y: dy / distance };
+                    shiftX += direction.x * push * 24;
+                    shiftY += direction.y * push * 24;
+                }
+                if (shiftX || shiftY) {
+                    const length = Math.hypot(shiftX, shiftY);
+                    const cap = 34;
+                    positions.set(artist.id, {
+                        x: point.x + shiftX * Math.min(1, cap / length),
+                        y: point.y + shiftY * Math.min(1, cap / length),
+                    });
+                }
+            }
+        }
         return positions;
+    },
+    artistLabelThreshold() {
+        const counts = this.data?.nodes.filter(node => node.group === 'artist')
+            .map(node => this.likedCounts?.[node.id.slice(7)] || 0)
+            .sort((left, right) => left - right) || [];
+        return counts.length ? counts[Math.ceil(counts.length * 0.75) - 1] : Infinity;
+    },
+    shouldShowArtistLabel(node, visibleNodes, selectedId) {
+        if (node.id === selectedId) return true;
+        const count = this.likedCounts?.[node.id.slice(7)] || 0;
+        if (!this.likedCounts || !count || count < this.artistLabelThreshold()) return false;
+        const point = this.initialPositions.get(node.id);
+        if (!point) return false;
+        return visibleNodes.every(other => {
+            if (other.id === node.id) return true;
+            const otherPoint = this.initialPositions.get(other.id);
+            if (!otherPoint) return true;
+            return Math.hypot(point.x - otherPoint.x, point.y - otherPoint.y) >=
+                (this.nodeSize(node) + this.nodeSize(other)) * 1.6;
+        });
     },
     filtered() {
         if (!this.data) return { artists: [], genres: [], edges: [] };
@@ -684,7 +840,8 @@ const GraphPage = {
     },
     renderNetwork({ artists, genres, edges }) {
         const selectedId = this.selectedNodeId;
-        const nodes = [...artists, ...genres].map(node => {
+        const visibleNodes = [...artists, ...genres];
+        const nodes = visibleNodes.map(node => {
             const artistThemeColor = typeof getComputedStyle === 'function' && node.group === 'artist'
                 ? getComputedStyle(document.documentElement).getPropertyValue('--text').trim() : null;
             const fill = artistThemeColor || node.color;
@@ -697,7 +854,7 @@ const GraphPage = {
                     : T(`${node.label} · genre · ${count || 0} artistes reliés`, `${node.label} · genre · ${count || 0} linked artists`);
             }
             return {
-                id: node.id, label: node.group === 'genre' || node.id === selectedId ? node.label : '',
+                id: node.id, label: node.group === 'genre' || this.shouldShowArtistLabel(node, visibleNodes, selectedId) ? node.label : '',
                 title,
                 font: { color: typeof getComputedStyle === 'function'
                     ? getComputedStyle(document.documentElement).getPropertyValue('--text').trim() : '#17231d' },
@@ -709,6 +866,7 @@ const GraphPage = {
                 },
                 borderWidth: 1.5,
                 borderWidthSelected: 2,
+                shadow: node.group === 'genre' ? { enabled: true, color: `${fill}66`, size: 10, x: 0, y: 0 } : false,
                 shape: 'dot',
                 size: this.nodeSize(node),
                 ...(!this.renderedNodes.has(node.id) ? this.initialPositions.get(node.id) : {}),
@@ -726,16 +884,10 @@ const GraphPage = {
                 { nodes: this.nodeSet, edges: this.edgeSet }, {
                     nodes: { font: { size: 13 } },
                     edges: { smooth: false, color: { color: '#a7ada9', opacity: 0.45 } },
-                    physics: {
-                        solver: 'barnesHut',
-                        barnesHut: { gravitationalConstant: -6500, centralGravity: 0.015,
-                            springLength: 170, springConstant: 0.025, damping: 0.2, avoidOverlap: 0.7 },
-                        stabilization: { enabled: true, iterations: 300, updateInterval: 50, fit: false },
-                    },
+                    physics: false,
                     interaction: { hideEdgesOnDrag: true, hideEdgesOnZoom: true, hover: true, tooltipDelay: 180 },
                 });
-            this.network.on('stabilized', () => this.finishLayout());
-            this.layoutTimer = window.setTimeout(() => this.finishLayout(), 4000);
+            this.finishLayout();
             this.network.on('click', params => { if (params.nodes[0]) this.selectNode(params.nodes[0]); });
             this.network.on('dragStart', () => { this.cameraInitialized = true; this.sampleFrames(); });
             this.network.on('zoom', () => this.sampleFrames());
@@ -750,16 +902,8 @@ const GraphPage = {
         this.renderedNodes = new Map(nodes.map(node => [node.id, JSON.stringify(node)]));
         this.renderedEdges = new Map(links.map(edge => [edge.id, JSON.stringify(edge)]));
     },
-    stopPhysics() {
-        if (!this.network || this.physicsStopped) return;
-        window.clearTimeout(this.layoutTimer);
-        this.network.setOptions({ physics: { enabled: false } });
-        this.physicsStopped = true;
-    },
     finishLayout() {
-        if (!this.network || this.physicsStopped) return;
-        this.stopPhysics();
-        if (this.cameraInitialized) return;
+        if (!this.network || this.cameraInitialized) return;
         this.cameraInitialized = true;
         this.network.fit({ animation: false });
         if (this.network.getScale() >= 0.55) return;
@@ -812,7 +956,7 @@ const GraphPage = {
                 spotify.target = '_blank'; spotify.rel = 'noopener noreferrer';
                 const map = appendText(content, 'a', T('Voir sur la carte', 'View on map'));
                 map.className = 'button button-quiet'; map.href = Statify.contextualLink('/map', { artist: id.slice(7) });
-                const playlist = Statify.recall('playlist');
+                const playlist = VisualizationSource.source === 'playlist' ? VisualizationSource.playlistId : Statify.recall('playlist');
                 if (playlist) {
                     const link = appendText(content, 'a', T('Revenir à la playlist', 'Return to playlist'));
                     link.className = 'button button-quiet'; link.href = Statify.contextualLink('/sorts', { playlist });
@@ -836,7 +980,7 @@ const GraphPage = {
             this.renderArtistGenres(details, id);
             const loading = appendText(details, 'p', T('Chargement des informations MusicBrainz…', 'Loading MusicBrainz information…'));
             try {
-                const result = await fetchJson(`/graphs/artist/${encodeURIComponent(id.slice(7))}/details`);
+                const result = await VisualizationSource.request(`/graphs/artist/${encodeURIComponent(id.slice(7))}/details`);
                 if (token !== this.selectionToken) return;
                 loading.remove();
                 if (result.match) renderMatch(details, result.match, node.label);
@@ -883,48 +1027,27 @@ const ReleaseYearGraph = {
     data: null,
     selectedYear: null,
     trackWord(count) { return count === 1 ? 'titre' : 'titres'; },
-    async init() {
-        const select = document.getElementById('release-playlist');
-        select.addEventListener('change', () => { Statify.remember('playlist', select.value); this.load(); });
-        try {
-            const result = await fetchJson('/playlists/get_playlists');
-            select.replaceChildren();
-            if (!result.playlists.length) {
-                select.add(new Option(T('Aucune playlist', 'No playlists'), ''));
-                showMessage(document.getElementById('release-status'), T('Aucune playlist trouvée.', 'No playlists found.'));
-                return;
-            }
-            for (const playlist of result.playlists) select.add(new Option(playlist.name, playlist.id));
-            const requested = new URLSearchParams(location.search).get('playlist') || Statify.recall('playlist');
-            if (requested && [...select.options].some(option => option.value === requested)) select.value = requested;
-            select.disabled = false;
-            await this.load();
-        } catch (error) {
-            showMessage(document.getElementById('release-status'), error.message);
-        }
-    },
     async load() {
         const token = ++this.loadToken;
-        const playlistId = document.getElementById('release-playlist').value;
         const status = document.getElementById('release-status');
         document.getElementById('release-chart').hidden = true;
         document.getElementById('release-summary').textContent = '';
         document.getElementById('release-undated').textContent = '';
         document.getElementById('release-details').replaceChildren();
-        if (!playlistId) return;
-        showMessage(status, T('Chargement des titres de la playlist…', 'Loading playlist tracks…'));
+        if (!VisualizationSource.ready) return;
+        showMessage(status, T('Chargement des titres…', 'Loading tracks…'));
         try {
-            const data = await postJson('/graphs/playlist_release_years', { playlist_id: playlistId });
+            const data = await VisualizationSource.request('/graphs/release_years');
             if (token !== this.loadToken) return;
             this.data = data;
             this.selectedYear = null;
             this.render();
             const requestedYear = Number(new URLSearchParams(location.search).get('year'));
             if (requestedYear && data.years.some(entry => entry.year === requestedYear)) this.selectYear(requestedYear);
-            showMessage(status, !data.track_count ? T('Cette playlist ne contient aucun titre.', 'This playlist has no tracks.')
+            showMessage(status, !data.track_count ? T('Aucun titre dans cette source.', 'No tracks in this source.')
                 : !data.years.length ? T('Aucun titre avec une année de sortie exploitable.', 'No tracks have a usable release year.') : '');
         } catch (error) {
-            if (token === this.loadToken) showMessage(status, error.message);
+            if (token === this.loadToken && error.name !== 'AbortError') showMessage(status, error.message);
         }
     },
     svgElement(name, attributes = {}, content = null) {
@@ -1008,9 +1131,11 @@ const ReleaseYearGraph = {
             for (const track of group.tracks) {
                 appendText(list, 'li', `${displayTrackName(track.name)} — ${track.artist_names.join(', ') || T('Artiste inconnu', 'Unknown artist')} · ${track.album_name || T('Album inconnu', 'Unknown album')}`);
             }
-            const link = appendText(content, 'a', T('Ouvrir la playlist triée', 'Open sorted playlist'));
-            link.className = 'button button-secondary';
-            link.href = Statify.contextualLink('/sorts', { playlist: document.getElementById('release-playlist').value });
+            if (VisualizationSource.source === 'playlist') {
+                const link = appendText(content, 'a', T('Ouvrir la playlist triée', 'Open sorted playlist'));
+                link.className = 'button button-secondary';
+                link.href = Statify.contextualLink('/sorts', { playlist: VisualizationSource.playlistId });
+            }
         });
         for (const bar of document.querySelectorAll('.release-bar')) {
             bar.classList.toggle('selected', bar.getAttribute('aria-label')?.startsWith(`${year}:`) || bar.getAttribute('aria-label')?.startsWith(`${year} :`));
@@ -1020,24 +1145,33 @@ const ReleaseYearGraph = {
 
 function initGraphModes() {
     const type = document.getElementById('graph-type');
-    let releaseInitialized = false;
-    type.addEventListener('change', () => {
+    if (new URLSearchParams(location.search).get('mode') === 'release_years') type.value = 'release_years';
+    const showMode = () => {
         const release = type.value === 'release_years';
         document.getElementById('artist-graph-controls').hidden = release;
         document.getElementById('artist-graph-view').hidden = release;
         document.getElementById('release-graph-controls').hidden = !release;
         document.getElementById('release-graph-view').hidden = !release;
-        if (release && !releaseInitialized) {
-            releaseInitialized = true;
-            ReleaseYearGraph.init();
-        }
+        if (release && VisualizationSource.ready) ReleaseYearGraph.load();
         if (!release) requestAnimationFrame(() => GraphPage.network?.redraw());
-    });
+    };
+    type.addEventListener('change', showMode);
     GraphPage.init();
-    if (new URLSearchParams(location.search).get('mode') === 'release_years') {
-        type.value = 'release_years';
-        type.dispatchEvent(new Event('change'));
-    }
+    showMode();
+    VisualizationSource.init(ready => {
+        GraphPage.resetSource();
+        ++ReleaseYearGraph.loadToken;
+        ReleaseYearGraph.data = null;
+        ReleaseYearGraph.selectedYear = null;
+        for (const id of ['release-status', 'release-summary', 'release-undated', 'release-details']) {
+            document.getElementById(id).replaceChildren();
+        }
+        document.getElementById('release-chart').hidden = true;
+        if (ready) {
+            GraphPage.loadGraph();
+            if (type.value === 'release_years') ReleaseYearGraph.load();
+        }
+    });
 }
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -7,12 +7,14 @@
   const t = (fr, en) => locale() === 'en' ? en : fr;
   const errorCodes = {
     session_expired: 'Your Spotify session expired. Please sign in again.',
+    local_profile_required: 'No local profile. Connect Spotify once to associate your account.',
     invalid_csrf: 'Invalid security token.',
     not_found: 'Resource not found.',
     playlist_not_found: 'Playlist not found in your library.',
     playlist_required: 'A playlist is required.',
     invalid_sort: 'Unknown sort option.',
-    artist_not_found: 'Followed artist not found.',
+    artist_not_found: 'Artist not found in the selected source.',
+    invalid_source: 'Unknown source.',
     match_not_found: 'Match not found.',
     account_changed: 'The Spotify account changed. Please sign in again.',
     artists_not_loaded: 'Load your followed artists first.',
@@ -62,7 +64,7 @@
   const translateStatic = () => {
     document.documentElement.lang = locale();
     if (locale() === 'en') {
-      const titles = { home: 'Home', sorts: 'Playlists', graphs: 'Graph', map: 'Map', timeline: 'Timeline', progress: 'Progress', settings: 'Settings' };
+      const titles = { home: 'Home', sorts: 'Playlists', graphs: 'Graph', map: 'Map', timeline: 'Timeline', progress: 'Progress', settings: 'Settings', ia: 'AI' };
       document.title = `Statify — ${titles[document.body.id] || 'Music'}`;
     }
     document.querySelectorAll('[data-en]').forEach(el => {
@@ -108,6 +110,9 @@
   const recall = key => storage(`statify-context-${key}`);
   const contextualLink = (path, params = {}) => {
     const url = new URL(path, location.origin);
+    if (['/graphs', '/map', '/timeline'].includes(url.pathname) && window.VisualizationSource && !params.source) {
+      params = { ...VisualizationSource.params(), ...params };
+    }
     for (const [key, value] of Object.entries(params)) if (value) url.searchParams.set(key, value);
     return url.pathname + url.search;
   };
@@ -143,6 +148,11 @@
       button.setAttribute('aria-pressed', String(button.dataset.themeOption === theme));
     });
     if (document.body.id === 'home') {
+      fetch('/ia/api/summary').then(r => r.ok ? r.json() : Promise.reject()).then(data => {
+        const next = document.getElementById('home-ia-next');
+        const ratings = Object.entries(data.annotations).filter(([k]) => k !== 'unknown').reduce((sum, [,n]) => sum+n, 0);
+        next.textContent = !data.coverage.total ? t('Importer votre historique pour commencer.', 'Import your history to begin.') : ratings < 120 ? t(`Donner vos avis : ${ratings} / 120 titres visés.`, `Give your ratings: ${ratings} / 120 target tracks.`) : t('Comparer les modèles dans le laboratoire IA.', 'Compare models in the AI laboratory.');
+      }).catch(() => {});
       fetch('/home/summary').then(response => { if (!response.ok) throw Error(); return response.json(); }).then(data => {
         for (const key of ['playlists', 'artists', 'tracks']) {
           if (data[key] === null) continue;

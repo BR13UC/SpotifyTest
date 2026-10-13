@@ -49,3 +49,42 @@ def test_api_error_keeps_message_and_adds_stable_code(tmp_path, monkeypatch):
     response = client.get("/sorts/get_sort_options")
     assert response.status_code == 401
     assert response.json == {"error": "Session Spotify expirée. Reconnectez-vous.", "error_code": "session_expired"}
+
+
+def test_progress_updates_actual_template_in_both_tabs(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+    import pytest
+
+    if not shutil.which("node"):
+        pytest.skip("Node.js unavailable")
+    app = create_app({"TESTING": True, "DATA_DIR": str(tmp_path), "SECRET_KEY": "test"})
+    monkeypatch.setattr(pages, "is_valid_token", lambda: bool(session.get("spotify_user_id")))
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["spotify_user_id"] = "alice"
+    html = client.get("/progress").get_data(as_text=True)
+    subprocess.run(["node", str(Path(__file__).with_name("progress_render.js"))],
+                   input=json.dumps({"html": html}), capture_output=True, text=True, check=True, timeout=30)
+
+
+def test_map_list_groups_sorts_and_preserves_expansion(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+    import shutil
+    import subprocess
+    import pytest
+
+    if not shutil.which("node"):
+        pytest.skip("Node.js unavailable")
+    app = create_app({"TESTING": True, "DATA_DIR": str(tmp_path), "SECRET_KEY": "test"})
+    monkeypatch.setattr(pages, "is_valid_token", lambda: bool(session.get("spotify_user_id")))
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["spotify_user_id"] = "alice"
+    html = client.get("/map").get_data(as_text=True)
+    assert 'aria-labelledby="map-list-title"' in html
+    subprocess.run(["node", str(Path(__file__).with_name("map_render.js"))],
+                   input=json.dumps({"html": html}), capture_output=True, text=True, check=True, timeout=30)

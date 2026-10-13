@@ -5,3 +5,5 @@ python-dotenv==1.0.1
 flask-session==0.8.0
 cachelib==0.17.0
 gunicorn==26.2.0
+
+scikit-learn==1.7.2

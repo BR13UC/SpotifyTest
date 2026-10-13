@@ -353,6 +353,34 @@ def test_graph_genre_degree_and_colors(app):
         assert abs(saturation - border_saturation) < 0.02
 
 
+def test_graph_genre_taxonomy_cooccurrence_and_clusters(app):
+    from app.services import genre_colors
+
+    assert genre_colors.classify_details("K-pop") == ("East Asian Pop", "K-pop")
+    assert genre_colors.classify_details("afrobeats") == ("African", "Afrobeats")
+    assert genre_colors.classify_details("indie rock") == ("Rock", "Indie & Alternative")
+    with app.app_context():
+        storage.replace_followed_artists("alice", [
+            {"id": "one", "name": "One", "genres": ["indie rock", "mystery haze"]},
+            {"id": "two", "name": "Two", "genres": ["indie rock", "mystery haze"]},
+            {"id": "three", "name": "Three", "genres": ["indie rock", "mystery wave"]},
+            {"id": "four", "name": "Four", "genres": ["balanced mystery", "rock", "house"]},
+        ])
+    client = app.test_client()
+    login(client)
+    nodes = {node["id"]: node for node in client.get("/graphs/get_artist_genre_graph_data").json["nodes"]}
+    inferred = nodes["genre:mystery haze"]
+    assert inferred["family"] == "Rock"
+    assert inferred["subfamily"] == "Indie & Alternative"
+    assert inferred["classification_source"] == "cooccurrence"
+    assert inferred["color"] != "#9aa3a9"
+    assert inferred["cluster"] == "Rock / Indie & Alternative"
+    unresolved = nodes["genre:balanced mystery"]
+    assert unresolved["family"] is None
+    assert unresolved["classification_source"] == "unclassified"
+    assert unresolved["cluster"] == "Non classé"
+
+
 def test_graph_node_sizes():
     if not shutil.which("node"):
         pytest.skip("Node.js absent")
@@ -402,6 +430,7 @@ def test_graph_node_sizes():
             { from: 'artist:two', to: 'genre:metal' },
         ];
         page.initialPositions = page.layoutPositions(layoutNodes, layoutEdges);
+        const basePositions = [...page.initialPositions];
         page.data = { nodes: layoutNodes };
         page.renderNetwork({
             artists: [{ id: 'artist:one', label: 'One', group: 'artist', color: '#171717', border_color: '#050505' }],
@@ -411,8 +440,45 @@ def test_graph_node_sizes():
         const options = page.network.options.physics;
         const timeout = page.layoutTimer;
         page.finishLayout();
-        process.stdout.write(JSON.stringify({ sizes, nodes: page.nodeSet.data, positions: [...page.initialPositions],
-            repeat: [...page.layoutPositions(layoutNodes, layoutEdges)], options, timeout, calls: page.network.calls }));
+        const denseNodes = [
+            { id: 'genre:rock', group: 'genre', family: 'Rock', artist_count: 12 },
+            { id: 'genre:jazz', group: 'genre', family: 'Jazz', artist_count: 8 },
+            ...Array.from({ length: 12 }, (_, index) => ({ id: `artist:rock-${index}`, group: 'artist' })),
+            ...Array.from({ length: 8 }, (_, index) => ({ id: `artist:jazz-${index}`, group: 'artist' })),
+        ];
+        const denseEdges = [
+            ...Array.from({ length: 12 }, (_, index) => ({ from: `artist:rock-${index}`, to: 'genre:rock' })),
+            ...Array.from({ length: 8 }, (_, index) => ({ from: `artist:jazz-${index}`, to: 'genre:jazz' })),
+        ];
+        page.initialPositions = page.layoutPositions(denseNodes, denseEdges);
+        page.data = { nodes: denseNodes };
+        page.likedCounts = { 'rock-0': 100 };
+        page.maxLikedCount = 100;
+        const densePoints = [...page.initialPositions];
+        const denseMinimum = densePoints.reduce((minimum, [leftId, left]) => Math.min(minimum, ...densePoints
+            .filter(([rightId]) => leftId < rightId)
+            .map(([, right]) => Math.hypot(left.x - right.x, left.y - right.y))), Infinity);
+        const labels = {
+            important: page.shouldShowArtistLabel(denseNodes.find(node => node.id === 'artist:rock-0'), denseNodes, null),
+            quiet: page.shouldShowArtistLabel(denseNodes.find(node => node.id === 'artist:rock-1'), denseNodes, null),
+            selected: page.shouldShowArtistLabel(denseNodes.find(node => node.id === 'artist:rock-1'), denseNodes, 'artist:rock-1'),
+        };
+        const weightedNodes = [
+            { id: 'genre:hub', group: 'genre', family: 'Rock', cluster: 'Rock / Indie', artist_count: 20 },
+            { id: 'genre:neighbor', group: 'genre', family: 'Rock', cluster: 'Rock / Indie', artist_count: 10 },
+            { id: 'genre:rare', group: 'genre', family: 'Jazz', cluster: 'Jazz', artist_count: 1 },
+        ];
+        const weighted = page.layoutPositions(weightedNodes, []);
+        const pointDistance = (left, right) => Math.hypot(left.x - right.x, left.y - right.y);
+        const weightedLayout = {
+            local: pointDistance(weighted.get('genre:hub'), weighted.get('genre:neighbor')),
+            remote: pointDistance(weighted.get('genre:hub'), weighted.get('genre:rare')),
+            hubRadius: Math.hypot(weighted.get('genre:hub').x, weighted.get('genre:hub').y),
+            rareRadius: Math.hypot(weighted.get('genre:rare').x, weighted.get('genre:rare').y),
+        };
+        process.stdout.write(JSON.stringify({ sizes, nodes: page.nodeSet.data, positions: basePositions,
+            repeat: [...page.layoutPositions(layoutNodes, layoutEdges)], options, timeout, calls: page.network.calls,
+            denseMinimum, labels, weightedLayout }));
     """, str(script)], check=True, capture_output=True, text=True)
     rendered = json.loads(result.stdout)
     zero, few, many, small_genre, large_genre, unavailable = rendered["sizes"]
@@ -430,10 +496,15 @@ def test_graph_node_sizes():
         return ((positions[left]["x"] - positions[right]["x"]) ** 2 +
                 (positions[left]["y"] - positions[right]["y"]) ** 2) ** 0.5
     assert distance("genre:rock", "genre:metal") < distance("genre:rock", "genre:house")
+    assert distance("artist:one", "genre:rock") < distance("artist:one", "genre:house")
     assert distance("artist:two", "genre:metal") < distance("artist:two", "genre:house")
-    assert rendered["options"]["stabilization"]["fit"] is False
-    assert rendered["timeout"] == 4000
-    assert [call[0] for call in rendered["calls"]] == ["setOptions", "fit", "moveTo"]
+    assert rendered["options"] is False
+    assert "timeout" not in rendered
+    assert [call[0] for call in rendered["calls"]] == ["fit", "moveTo"]
+    assert rendered["denseMinimum"] >= 60
+    assert rendered["labels"] == {"important": True, "quiet": False, "selected": True}
+    assert rendered["weightedLayout"]["local"] < rendered["weightedLayout"]["remote"]
+    assert rendered["weightedLayout"]["hubRadius"] < rendered["weightedLayout"]["rareRadius"]
 
 
 def test_graph_batch_matches_and_account_scoped_details(app, monkeypatch):

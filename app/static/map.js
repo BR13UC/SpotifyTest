@@ -9,6 +9,9 @@ const markerLayer = L.layerGroup().addTo(map);
 let countryArtists = new Map();
 let lastData = '';
 let restoredSelection = false;
+let listMarkers = [];
+const listSort = document.getElementById('map-list-sort');
+listSort.addEventListener('change', () => renderPlaceList(listMarkers));
 
 function countryStyle(hasArtists) {
     const dark = document.documentElement.dataset.theme === 'dark' ||
@@ -58,18 +61,87 @@ function renderCountries() {
         layer.on('click', () => openPlace({ label: layer.feature.properties.ADMIN || code || '—', precision: 'country', artists }));
     });
 }
+const continents = [
+    ['Africa', 'Afrique'], ['Asia', 'Asie'], ['Europe', 'Europe'],
+    ['North America', 'Amérique du Nord'], ['South America', 'Amérique du Sud'],
+    ['Oceania', 'Océanie'], ['Antarctica', 'Antarctique'],
+];
+function renderPlaceList(markers) {
+    const container = document.getElementById('map-place-list');
+    const expanded = new Set([...container.querySelectorAll('details[open]')].map(item => item.dataset.key));
+    const collator = new Intl.Collator(Statify.locale(), { sensitivity: 'base', numeric: true });
+    const countryNames = new Intl.DisplayNames([Statify.locale()], { type: 'region' });
+    const compare = (a, b) => (listSort.value === 'count' ? b.count - a.count : 0) ||
+        collator.compare(a.label, b.label) || collator.compare(a.key, b.key);
+    const groups = new Map();
+    for (const place of markers) {
+        const continent = continents.some(([name]) => name === place.continent) ? place.continent : 'unknown';
+        if (!groups.has(continent)) groups.set(continent, new Map());
+        const countries = groups.get(continent);
+        const code = place.country_code;
+        const key = code || 'unknown';
+        const label = code && /^[A-Z]{2}$/.test(code) ? countryNames.of(code)
+            : place.country || Statify.t('Pays inconnu', 'Unknown country');
+        if (!countries.has(key)) countries.set(key, { key: JSON.stringify([continent, key]), label, count: 0, cities: new Map() });
+        const country = countries.get(key);
+        country.count += place.artists.length;
+        const cityKey = place.precision === 'city' ? place.id : 'unknown';
+        if (!country.cities.has(cityKey)) country.cities.set(cityKey, {
+            key: JSON.stringify([continent, key, cityKey]),
+            label: place.precision === 'city' ? place.label : Statify.t('Ville inconnue', 'Unknown city'),
+            count: 0, entries: [],
+        });
+        const city = country.cities.get(cityKey);
+        city.count += place.artists.length;
+        city.entries.push(...place.artists.map(artist => ({ artist, place })));
+    }
+    container.replaceChildren();
+    if (!markers.length) {
+        appendText(container, 'p', Statify.t('Aucun lieu confirmé à afficher.', 'No confirmed places to show.'));
+        return;
+    }
+    const countLabel = count => Statify.t(`${count} artiste${count === 1 ? '' : 's'}`, `${count} artist${count === 1 ? '' : 's'}`);
+    const details = (parent, group, className) => {
+        const element = appendText(parent, 'details', '');
+        element.className = className;
+        element.dataset.key = group.key;
+        element.open = expanded.has(group.key);
+        const summary = appendText(element, 'summary', '');
+        appendText(summary, 'span', group.label);
+        appendText(summary, 'small', countLabel(group.count));
+        return element;
+    };
+    for (const [name, french] of [...continents, ['unknown', 'Continent inconnu']]) {
+        if (!groups.has(name)) continue;
+        const countries = [...groups.get(name).values()].sort(compare);
+        const column = appendText(container, 'section', '');
+        column.className = 'map-continent';
+        const heading = appendText(column, 'h3', Statify.t(french, name === 'unknown' ? 'Unknown continent' : name));
+        appendText(heading, 'small', countLabel(countries.reduce((sum, country) => sum + country.count, 0)));
+        for (const country of countries) {
+            const countryDetails = details(column, country, 'map-country');
+            for (const city of [...country.cities.values()].sort(compare)) {
+                const cityDetails = details(countryDetails, city, 'map-city');
+                const artists = appendText(cityDetails, 'ul', '');
+                for (const { artist, place } of city.entries.sort((a, b) => collator.compare(a.artist.name, b.artist.name))) {
+                    const item = appendText(artists, 'li', '');
+                    const button = appendText(item, 'button', artist.name);
+                    button.type = 'button';
+                    button.addEventListener('click', () => openArtist(artist, place));
+                }
+            }
+        }
+    }
+}
 function renderData(data) {
     const signature = JSON.stringify(data);
     if (signature === lastData) return;
     lastData = signature;
     markerLayer.clearLayers();
     countryArtists = new Map();
-    const placeList = document.getElementById('map-place-list');
-    placeList.replaceChildren();
+    listMarkers = data.markers;
+    renderPlaceList(listMarkers);
     for (const place of data.markers) {
-        const button = appendText(placeList, 'button', Statify.t(`${place.label} · ${place.artists.length} artistes`, `${place.label} · ${place.artists.length} artists`));
-        button.type = 'button';
-        button.addEventListener('click', () => { map.setView([place.latitude, place.longitude], Math.max(map.getZoom(), 4)); openPlace(place); });
         if (place.country_code) {
             if (!countryArtists.has(place.country_code)) countryArtists.set(place.country_code, []);
             countryArtists.get(place.country_code).push(...place.artists);
@@ -87,9 +159,9 @@ function renderData(data) {
     renderCountries();
     const counts = data.counts;
     mapCounts.textContent = Statify.t(
-        `${counts.total} artistes suivis · ${counts.city} situés en ville · ${counts.country} au niveau du pays · ${counts.unknown} non placés`,
-        `${counts.total} followed artists · ${counts.city} located in a city · ${counts.country} at country level · ${counts.unknown} not placed`);
-    mapStatus.textContent = counts.total === 0 ? Statify.t('Aucun artiste suivi chargé.', 'No followed artists loaded.')
+        `${counts.total} artistes · ${counts.city} situés en ville · ${counts.country} au niveau du pays · ${counts.unknown} non placés`,
+        `${counts.total} artists · ${counts.city} located in a city · ${counts.country} at country level · ${counts.unknown} not placed`);
+    mapStatus.textContent = counts.total === 0 ? Statify.t('Aucun artiste dans cette source.', 'No artists in this source.')
         : counts.pending && data.markers.length ? Statify.t(`${data.markers.length} repères affichés · ${counts.pending} origines en cours de localisation…`, `${data.markers.length} markers shown · ${counts.pending} origins being located…`)
         : counts.pending ? Statify.t(`${counts.pending} origines en cours de localisation…`, `${counts.pending} origins being located…`)
         : data.markers.length ? Statify.t(`${data.markers.length} repères affichés.`, `${data.markers.length} markers shown.`)
@@ -103,14 +175,29 @@ function renderData(data) {
     }
 }
 async function refreshMap() {
-    try { renderData(await fetchJson('/map/data')); }
-    catch (error) { mapStatus.textContent = Statify.t(`Carte indisponible : ${error.message}`, `Map unavailable: ${error.message}`); }
+    if (!VisualizationSource.ready) return;
+    try { renderData(await VisualizationSource.request('/map/data')); }
+    catch (error) {
+        if (error.name !== 'AbortError') mapStatus.textContent = Statify.t(`Carte indisponible : ${error.message}`, `Map unavailable: ${error.message}`);
+    }
 }
 fetch('/static/world-countries.geojson')
     .then(response => { if (!response.ok) throw new Error(Statify.t('Frontières indisponibles', 'Borders unavailable')); return response.json(); })
     .then(geojson => { countryLayer.addData(geojson); renderCountries(); })
     .catch(error => { mapStatus.textContent = error.message; });
-fetchJson('/users/get_followed_artists').catch(() => {}).finally(refreshMap);
-window.setInterval(() => { if (!document.hidden) refreshMap(); }, 12000);
+VisualizationSource.init(ready => {
+    lastData = '';
+    restoredSelection = false;
+    markerLayer.clearLayers();
+    countryArtists = new Map();
+    listMarkers = [];
+    document.getElementById('map-place-list').replaceChildren();
+    mapCounts.textContent = '';
+    mapStatus.textContent = '';
+    renderCountries();
+    if (ready) refreshMap();
+});
+const mapPolling = window.setInterval(() => { if (!document.hidden) refreshMap(); }, 12000);
+window.addEventListener('pagehide', () => { clearInterval(mapPolling); VisualizationSource.controller.abort(); });
 new MutationObserver(renderCountries).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', renderCountries);

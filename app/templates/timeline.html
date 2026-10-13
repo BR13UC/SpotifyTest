@@ -3,7 +3,8 @@
 {% block title %}Statify — Timeline{% endblock %}
 {% block page_id %}timeline{% endblock %}
 {% block content %}
-<div class="page-heading"><p class="eyebrow" data-en="Chronology">Chronologie</p><h1 data-en="Artist timeline">Timeline des artistes</h1><p data-en="Lifetimes and Spotify releases of your followed artists.">Vies et sorties Spotify des artistes que vous suivez.</p></div>
+<div class="page-heading"><p class="eyebrow" data-en="Chronology">Chronologie</p><h1 data-en="Artist timeline">Timeline des artistes</h1><p data-en="Lifetimes and complete Spotify discographies of the selected artists.">Vies et discographies Spotify complètes des artistes sélectionnés.</p></div>
+<section class="surface controls-card source-card">{% include 'artist_source.html' %}</section>
 <section class="surface timeline-card" aria-label="Timeline des artistes" data-en-aria-label="Artist timeline">
   <p id="timeline-status" class="status-line" role="status" aria-live="polite"></p>
   <button id="timeline-retry" class="button button-secondary" type="button" hidden data-en="Retry failed discographies">Réessayer les discographies en échec</button>

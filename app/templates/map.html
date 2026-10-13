@@ -4,9 +4,14 @@
 {% block page_id %}map{% endblock %}
 {% block extra_head %}<link rel="stylesheet" href="{{ url_for('static', filename='leaflet.css') }}">{% endblock %}
 {% block content %}
-<div class="page-heading page-heading-split"><div><p class="eyebrow" data-en="Origins">Origines</p><h1 data-en="Map of followed artists">Carte des artistes suivis</h1><p data-en="Birth or formation city when known; otherwise the country given by MusicBrainz.">Ville de naissance ou de formation si connue ; sinon, pays indiqué par MusicBrainz.</p></div><button id="map-reset" class="button button-secondary" type="button" data-en="World view">Vue mondiale</button></div>
+<div class="page-heading page-heading-split"><div><p class="eyebrow" data-en="Origins">Origines</p><h1 data-en="Artist origins map">Carte des origines des artistes</h1><p data-en="Birth or formation city when known; otherwise the country given by MusicBrainz.">Ville de naissance ou de formation si connue ; sinon, pays indiqué par MusicBrainz.</p></div><button id="map-reset" class="button button-secondary" type="button" data-en="World view">Vue mondiale</button></div>
+<section class="surface controls-card source-card">{% include 'artist_source.html' %}</section>
 <section class="surface map-card"><p id="map-status" class="status-line" role="status" aria-live="polite" data-en="Loading map…">Chargement de la carte…</p><div id="origin-map" role="application" aria-label="Carte interactive des origines des artistes" data-en-aria-label="Interactive artist origins map"></div>
 <div class="map-summary"><p id="map-counts"></p><p><span class="map-key map-key-city"></span> <span data-en="Located city">Ville localisée</span> <span class="map-key map-key-country"></span> <span data-en="Country only">Pays uniquement</span></p><p data-en="Country markers are approximate. Select a marker or country to inspect artists and sources.">Les repères au niveau du pays sont approximatifs. Sélectionnez un repère ou un pays pour voir les artistes et leurs sources.</p></div></section>
-<details class="surface map-place-list"><summary data-en="Browse places as a list">Parcourir les lieux en liste</summary><div id="map-place-list"></div></details>
+<section class="surface map-place-list" aria-labelledby="map-list-title">
+<div class="map-list-heading"><h2 id="map-list-title" data-en="Artists by continent">Artistes par continent</h2>
+<label for="map-list-sort"><span data-en="Sort countries and cities">Trier les pays et villes</span>
+<select id="map-list-sort"><option value="alphabetical" data-en="Alphabetical order">Ordre alphabétique</option><option value="count" data-en="Number of artists">Nombre d’artistes</option></select></label></div>
+<div id="map-place-list"></div></section>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='leaflet.js') }}"></script><script src="{{ url_for('static', filename='map.js') }}"></script>{% endblock %}

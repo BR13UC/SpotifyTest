@@ -1,7 +1,9 @@
 """Account-scoped SQLite cache for Spotify responses."""
 
 import json
+import logging
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -26,7 +28,10 @@ def is_stale(updated_at, max_age=timedelta(days=1)):
 
 @contextmanager
 def connect():
-    connection = sqlite3.connect(current_app.config["DATABASE_PATH"])
+    connection = sqlite3.connect(
+        current_app.config["DATABASE_PATH"],
+        timeout=current_app.config.get("SQLITE_BUSY_TIMEOUT_SECONDS", 30),
+    )
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     try:
@@ -39,9 +44,37 @@ def connect():
         connection.close()
 
 
+def is_busy_error(error):
+    if not isinstance(error, sqlite3.OperationalError):
+        return False
+    code = getattr(error, "sqlite_errorcode", None)
+    if code is not None:
+        return code & 0xff in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+    return str(error).lower().startswith(("database is locked", "database table is locked"))
+
+
+def wait_for_database(operation):
+    """Retry worker operations on contention, without hiding other failures."""
+    while True:
+        try:
+            return operation()
+        except sqlite3.OperationalError as error:
+            if not is_busy_error(error):
+                raise
+            logging.getLogger(__name__).warning("SQLite busy; retrying worker operation in one second")
+            time.sleep(1)
+
+
 def init_db():
     with connect() as db:
+        # Persistent mode: set it once rather than competing for a mode change
+        # on every web/worker connection. Reads can then run during imports.
+        if db.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+            mode = db.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+            if mode.lower() != "wal":
+                raise RuntimeError("SQLite WAL mode is required for concurrent workers")
         db.executescript("""
+            BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS cache_entries (
                 user_id TEXT NOT NULL,
                 resource TEXT NOT NULL,

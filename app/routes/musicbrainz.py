@@ -2,7 +2,7 @@
 
 from flask import Blueprint, jsonify, request, session
 
-from app.services import musicbrainz
+from app.services import artist_sources, musicbrainz
 
 
 musicbrainz_bp = Blueprint("musicbrainz", __name__)
@@ -11,7 +11,11 @@ musicbrainz_bp = Blueprint("musicbrainz", __name__)
 @musicbrainz_bp.get("/status")
 def status():
     user_id = session["spotify_user_id"]
-    return jsonify(counts=musicbrainz.status_for(user_id), reviews=musicbrainz.reviews_for(user_id, limit=20))
+    counts = musicbrainz.status_for(user_id)
+    if "source" in request.args:
+        source, playlist_id = artist_sources.selection()
+        counts["artist_revision"] = artist_sources.revision(user_id, source, playlist_id)
+    return jsonify(counts=counts, reviews=musicbrainz.reviews_for(user_id, limit=20))
 
 
 @musicbrainz_bp.get("/progress")
@@ -47,8 +51,11 @@ def comparison(spotify_id, mbid):
     if not result or mbid not in {candidate["id"] for candidate in result["candidates"]} | {result["mbid"]}:
         return jsonify(error="Candidat introuvable."), 404
     try:
+        if (result.get('match_evidence') or {}).get('version') == musicbrainz.ARTIST_MATCH_VERSION:
+            from app.services.artist_matching import comparison
+            return jsonify(comparison(session['spotify_user_id'], spotify_id, mbid, result))
         return jsonify(musicbrainz.album_comparison(spotify_id, mbid))
-    except musicbrainz.TemporaryFailure:
+    except (musicbrainz.TemporaryFailure, musicbrainz.SpotifyException):
         return jsonify(error="Catalogues momentanément indisponibles. Réessayez plus tard."), 503
 
 

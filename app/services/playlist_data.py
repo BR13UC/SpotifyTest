@@ -65,7 +65,7 @@ def get_playlists_for_user(user_id):
     return playlists
 
 
-def get_items_for_user(user_id, playlist_id):
+def get_items_for_user(user_id, playlist_id, enqueue=True):
     playlists = get_playlists_for_user(user_id)
     if playlist_id not in {playlist["id"] for playlist in playlists}:
         return None
@@ -73,7 +73,8 @@ def get_items_for_user(user_id, playlist_id):
     if metadata is not None and not storage.is_stale(updated_at):
         items = storage.get_playlist_items(user_id, playlist_id)
         from app.services.musicbrainz import enqueue_playlist
-        enqueue_playlist(user_id, items)
+        if enqueue:
+            enqueue_playlist(user_id, items)
         return items
     spotify = spotify_auth.get_spotify()
     items = []
@@ -87,7 +88,8 @@ def get_items_for_user(user_id, playlist_id):
         offset += len(entries)
     storage.replace_playlist_items(user_id, playlist_id, items)
     from app.services.musicbrainz import enqueue_playlist
-    enqueue_playlist(user_id, items)
+    if enqueue:
+        enqueue_playlist(user_id, items)
     return items
 
 

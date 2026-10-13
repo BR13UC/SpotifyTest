@@ -141,6 +141,7 @@ def test_city_resolution_and_country_fallback(app, monkeypatch):
     assert resolved["counts"]["city"] == 1
     assert resolved["markers"][0]["latitude"] == 48.8566
     assert resolved["markers"][0]["country_code"] == "FR"
+    assert resolved["markers"][0]["continent"] == "Europe"
     assert resolved["markers"][0]["artists"][0]["origin_type"] == "birth"
     login(client, "bob")
     other = client.get("/map/data").json
@@ -181,6 +182,7 @@ def test_unlocated_area_keeps_confirmed_country_and_is_cached(app, monkeypatch):
     assert result["counts"]["country"] == 1
     assert result["counts"]["pending"] == 0
     assert result["markers"][0]["precision"] == "country"
+    assert result["markers"][0]["continent"] == "Europe"
 
 
 def test_artist_country_is_not_used_for_an_unresolved_origin(app):
@@ -198,6 +200,7 @@ def test_artist_country_is_not_used_for_an_unresolved_origin(app):
     resolved = client.get("/map/data").json
     assert resolved["counts"]["city"] == 1
     assert resolved["markers"][0]["country_code"] == "ZA"
+    assert resolved["markers"][0]["continent"] == "Africa"
     assert resolved["markers"][0]["latitude"] == -33.9249
 
 
@@ -250,6 +253,7 @@ def test_saved_city_without_country_is_backfilled_without_losing_its_marker(app,
     first = client.get("/map/data").json
     assert first["markers"][0]["latitude"] == 55.7506
     assert first["markers"][0]["country_code"] is None
+    assert first["markers"][0]["continent"] is None
     with app.app_context():
         with storage.connect() as db:
             assert db.execute("SELECT status FROM geo_areas WHERE area_id=?", (PARIS,)).fetchone()[0] == "queued"

@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, request, session
 from flask_session import Session
 from spotipy.exceptions import SpotifyException
+from werkzeug.exceptions import BadRequest, Forbidden, NotFound
 
 
 def _persistent_secret(data_dir):
@@ -41,6 +42,7 @@ def create_app(test_config=None):
         SESSION_TYPE="cachelib",
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        MAX_CONTENT_LENGTH=64 * 1024 * 1024,
     )
     if test_config:
         app.config.update(test_config)
@@ -57,6 +59,8 @@ def create_app(test_config=None):
     from app.storage import init_db
     with app.app_context():
         init_db()
+        from app.services.ia_store import init_db as init_ia_db
+        init_ia_db()
 
     from app.routes.auth import auth_bp
     from app.routes.graph import graph_bp
@@ -78,11 +82,22 @@ def create_app(test_config=None):
     app.register_blueprint(map_bp, url_prefix="/map")
     app.register_blueprint(timeline_bp, url_prefix="/timeline")
     app.register_blueprint(router_bp)
+    from app.routes.ia import ia_bp
+    app.register_blueprint(ia_bp, url_prefix="/ia")
     from app.routes.auth import callback
     app.add_url_rule("/callback", endpoint="spotify_callback", view_func=callback)
 
     @app.before_request
     def protect_api():
+        if request.path.startswith("/ia/api/"):
+            if not session.get("spotify_user_id"):
+                return jsonify(error="Profil local absent. Connectez-vous une première fois.", error_code="local_profile_required"), 401
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+                expected = session.get("csrf_token", "")
+                supplied = request.headers.get("X-CSRF-Token", "")
+                if not expected or not hmac.compare_digest(expected, supplied):
+                    return jsonify(error="Jeton de sécurité invalide."), 403
+            return None
         if request.path.startswith(("/users/", "/playlists/", "/sorts/", "/graphs/", "/musicbrainz/", "/map/", "/timeline/")):
             from app.spotify_auth import is_valid_token
             if not is_valid_token():
@@ -104,9 +119,15 @@ def create_app(test_config=None):
         }
         return jsonify(error=messages[status]), status
 
+    @app.errorhandler(BadRequest)
+    @app.errorhandler(Forbidden)
+    def collection_error(error):
+        return jsonify(error=error.description), error.code
+
     @app.errorhandler(404)
-    def not_found(_error):
-        return jsonify(error="Ressource introuvable."), 404
+    def not_found(error):
+        message = error.description if isinstance(error, NotFound) and error.description != NotFound.description else "Ressource introuvable."
+        return jsonify(error=message), 404
 
     @app.after_request
     def add_error_code(response):
@@ -123,6 +144,8 @@ def create_app(test_config=None):
             "Identifiant de playlist requis.": "playlist_required",
             "Option de tri inconnue.": "invalid_sort",
             "Artiste suivi introuvable.": "artist_not_found",
+            "Artiste introuvable dans la source sélectionnée.": "artist_not_found",
+            "Source inconnue.": "invalid_source",
             "Correspondance introuvable.": "match_not_found",
             "Le compte Spotify a changé. Reconnectez-vous.": "account_changed",
             "Chargez d'abord les artistes suivis.": "artists_not_loaded",

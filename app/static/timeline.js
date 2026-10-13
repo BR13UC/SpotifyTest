@@ -15,11 +15,8 @@
   let polling;
   const { datePosition, sortArtists, lifeState, mergeReleases } = TimelineCore;
 
-  async function getJson(url) {
-    const response = await fetch(url);
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(Statify.translateError(data.error, data.error_code) || `HTTP ${response.status}`);
-    return data;
+  async function getJson(url, params = {}) {
+    return VisualizationSource.request(url, params);
   }
 
   function addText(parent, tag, value, className = '') {
@@ -47,7 +44,7 @@
   function openArtist(artist) {
     const start = artist.dates?.begin;
     const end = artist.dates?.end;
-    Statify.openDrawer(artist.name, T('Artiste suivi', 'Followed artist'), content => {
+    Statify.openDrawer(artist.name, T('Artiste', 'Artist'), content => {
       const isGroup = artist.type === 'Group' || artist.type === 'Orchestra' || artist.type === 'Choir';
       addText(content, 'p', `${isGroup ? T('Formation', 'Formed') : T('Naissance / début', 'Birth / start')} : ${start || '—'}`);
       if (end) addText(content, 'p', `${isGroup ? T('Dissolution', 'Disbanded') : T('Décès / fin', 'Death / end')} : ${end}`);
@@ -139,16 +136,18 @@
       (artist.match_status === 'confirmed' && artist.dates && !Object.hasOwn(artist.dates, 'ended'))).length;
     const reviews = artists.filter(artist => artist.match_status === 'ambiguous').length;
     status.textContent = T(
-      `${artists.length} artistes suivis · ${completed}/${artists.length} discographies Spotify chargées${loading ? '…' : ''}${failed.size ? ` · ${failed.size} échecs` : ''} · ${waiting} dates en attente · ${reviews} correspondances à vérifier`,
-      `${artists.length} followed artists · ${completed}/${artists.length} Spotify discographies loaded${loading ? '…' : ''}${failed.size ? ` · ${failed.size} failed` : ''} · ${waiting} dates pending · ${reviews} matches to review`);
+      `${artists.length} artistes · ${completed}/${artists.length} discographies Spotify chargées${loading ? '…' : ''}${failed.size ? ` · ${failed.size} échecs` : ''} · ${waiting} dates en attente · ${reviews} correspondances à vérifier`,
+      `${artists.length} artists · ${completed}/${artists.length} Spotify discographies loaded${loading ? '…' : ''}${failed.size ? ` · ${failed.size} failed` : ''} · ${waiting} dates pending · ${reviews} matches to review`);
     retry.hidden = failed.size === 0 || loading > 0;
   }
 
   async function loadReleases() {
+    if (!VisualizationSource.ready || loading > 0) return;
+    const generation = VisualizationSource.generation;
     const queue = artists.filter(artist => !releases.has(artist.id));
     let next = 0;
     async function worker() {
-      while (next < queue.length) {
+      while (next < queue.length && generation === VisualizationSource.generation) {
         const artist = queue[next++];
         loading++;
         render();
@@ -156,14 +155,18 @@
           const pages = [];
           let offset = 0;
           do {
-            const data = await getJson(`/timeline/artist/${encodeURIComponent(artist.id)}/releases?offset=${offset}`);
+            const data = await getJson(`/timeline/artist/${encodeURIComponent(artist.id)}/releases`, { offset: String(offset) });
+            if (generation !== VisualizationSource.generation) return;
             pages.push(data.releases);
             offset = data.next_offset;
           } while (offset !== null);
           releases.set(artist.id, mergeReleases(pages));
           failed.delete(artist.id);
           completed++;
-        } catch (_) { failed.add(artist.id); }
+        } catch (error) {
+          if (generation !== VisualizationSource.generation || error.name === 'AbortError') return;
+          failed.add(artist.id);
+        }
         loading--;
         render();
       }
@@ -175,7 +178,7 @@
     const data = await getJson('/timeline/data');
     artists = data.artists;
     render();
-    if (!artists.length) status.textContent = T('Aucun artiste suivi sur Spotify.', 'No followed artists on Spotify.');
+    if (!artists.length) status.textContent = T('Aucun artiste dans cette source.', 'No artists in this source.');
     if (polling && !artists.some(artist => artist.match_status === 'pending' ||
         (artist.match_status === 'confirmed' && artist.dates && !Object.hasOwn(artist.dates, 'ended')))) {
       clearInterval(polling);
@@ -184,18 +187,35 @@
   }
 
   async function start() {
-    status.textContent = T('Chargement des artistes suivis…', 'Loading followed artists…');
+    const generation = VisualizationSource.generation;
+    status.textContent = T('Chargement des artistes…', 'Loading artists…');
     try {
-      await getJson('/users/get_followed_artists');
       await refreshArtists();
-      await loadReleases();
+      if (generation !== VisualizationSource.generation) return;
       if (artists.some(artist => artist.match_status === 'pending' ||
           (artist.match_status === 'confirmed' && artist.dates && !Object.hasOwn(artist.dates, 'ended')))) {
         polling = setInterval(() => refreshArtists().catch(() => {}), 15000);
       }
-    } catch (error) { status.textContent = error.message; }
+      await loadReleases();
+    } catch (error) {
+      if (generation === VisualizationSource.generation && error.name !== 'AbortError') status.textContent = error.message;
+    }
   }
-  window.addEventListener('pagehide', () => clearInterval(polling));
+  window.addEventListener('pagehide', () => {
+    clearInterval(polling);
+    VisualizationSource.controller.abort();
+  });
   retry.addEventListener('click', loadReleases);
-  start();
+  VisualizationSource.init(ready => {
+    clearInterval(polling);
+    polling = undefined;
+    releases.clear();
+    failed.clear();
+    artists = [];
+    loading = 0;
+    completed = 0;
+    render();
+    status.textContent = '';
+    if (ready) start();
+  });
 })();

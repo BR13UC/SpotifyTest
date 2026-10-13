@@ -4,6 +4,7 @@ import json
 from datetime import timedelta
 
 from app import spotify_auth, storage
+from app.services import artist_sources
 
 
 RELEASE_CACHE_AGE = timedelta(days=30)
@@ -11,43 +12,32 @@ EMPTY_CACHE_AGE = timedelta(days=7)
 CATEGORIES = {"album", "single", "compilation"}
 
 
-def artist_data(user_id):
-    metadata, _ = storage.get_cache(user_id, "followed_artists")
-    if metadata is None:
+def artist_data(user_id, source="followed", playlist_id=None):
+    records = artist_sources.records(user_id, source, playlist_id)
+    if records is None:
         return None
+    artists = []
     with storage.connect() as db:
-        rows = db.execute(
-            "SELECT f.artist_id, f.payload, m.status, m.enriched FROM followed_artists AS f "
-            "LEFT JOIN mb_matches AS m ON m.user_id=f.user_id AND m.kind='artist' AND m.spotify_id=f.artist_id "
-            "WHERE f.user_id=?", (user_id,),
-        ).fetchall()
-        # Older enriched rows predate the MusicBrainz 'ended' field. Refresh those
-        # through the existing durable worker rather than assuming they are active.
-        for row in rows:
-            enriched = json.loads(row["enriched"]) if row["enriched"] else None
-            if row["status"] == "confirmed" and enriched and "ended" not in (enriched.get("dates") or {}):
+        for spotify, row in records:
+            enriched = json.loads(row["enriched"]) if row and row["enriched"] else None
+            status = row["status"] if row else "pending"
+            if status == "confirmed" and enriched and "ended" not in (enriched.get("dates") or {}):
                 db.execute(
                     "INSERT OR IGNORE INTO mb_jobs(user_id,kind,spotify_id,available_at) VALUES(?,'artist',?,?)",
-                    (user_id, row["artist_id"], storage.now()),
+                    (user_id, spotify["id"], storage.now()),
                 )
-    artists = []
-    for row in rows:
-        spotify = json.loads(row["payload"])
-        enriched = json.loads(row["enriched"]) if row["enriched"] else None
-        artists.append({
-            "id": row["artist_id"], "name": spotify.get("name") or "Artiste inconnu",
-            "match_status": row["status"] or "pending",
-            "type": enriched.get("type") if enriched else None,
-            "dates": enriched.get("dates") if enriched else None,
-        })
+            artists.append({
+                "id": spotify["id"], "name": spotify.get("name") or "Artiste inconnu",
+                "match_status": status,
+                "type": enriched.get("type") if enriched else None,
+                "dates": enriched.get("dates") if enriched else None,
+            })
     return artists
 
 
-def release_page_for(user_id, spotify_id, offset=0):
-    with storage.connect() as db:
-        followed = db.execute("SELECT 1 FROM followed_artists WHERE user_id=? AND artist_id=?",
-                              (user_id, spotify_id)).fetchone()
-    if not followed:
+def release_page_for(user_id, spotify_id, offset=0, source="followed", playlist_id=None):
+    artists = artist_sources.collection(user_id, source, playlist_id) or []
+    if spotify_id not in {artist["id"] for artist in artists}:
         return None
     cache_key = f"{spotify_id}:{offset}"
     cached, updated_at = storage.get_cache(user_id, "timeline_releases", cache_key)

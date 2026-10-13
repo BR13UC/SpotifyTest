@@ -8,7 +8,7 @@ from flask import Blueprint, jsonify, request, send_file, session
 from spotipy.exceptions import SpotifyException
 
 from app import storage
-from app.services import genre_colors, liked_tracks, musicbrainz
+from app.services import artist_sources, genre_colors, liked_tracks, musicbrainz
 from app.services.playlist_data import get_items_for_user
 
 graph_bp = Blueprint("graph", __name__)
@@ -34,6 +34,16 @@ def playlist_release_years():
     items = get_items_for_user(session["spotify_user_id"], playlist_id)
     if items is None:
         return jsonify(error="Playlist introuvable dans votre bibliothèque."), 404
+    return release_year_response(items)
+
+
+@graph_bp.get("/release_years")
+def release_years():
+    source, playlist_id = artist_sources.selection()
+    return release_year_response(artist_sources.tracks(session["spotify_user_id"], source, playlist_id))
+
+
+def release_year_response(items):
     grouped = {}
     undated_count = 0
     track_count = 0
@@ -53,25 +63,18 @@ def playlist_release_years():
                    undated_count=undated_count, track_count=track_count)
 
 
-def graph_records(user_id, include_match=False):
-    metadata, _updated_at = storage.get_cache(user_id, "followed_artists")
-    if metadata is None:
+def graph_records(user_id, include_match=False, source="followed", playlist_id=None):
+    records = artist_sources.records(user_id, source, playlist_id)
+    if records is None:
         return None
-    with storage.connect() as db:
-        fields = "m.*" if include_match else "m.spotify_id, m.enriched, m.updated_at"
-        rows = db.execute(
-            f"SELECT f.payload AS artist_payload, {fields} FROM followed_artists AS f "
-            "LEFT JOIN mb_matches AS m ON m.user_id=f.user_id AND m.kind='artist' AND m.spotify_id=f.artist_id "
-            "WHERE f.user_id=? ORDER BY f.artist_id", (user_id,),
-        ).fetchall()
-    return [(json.loads(row["artist_payload"]),
-             json.loads(row["enriched"]) if row["enriched"] else None,
-             musicbrainz._row_dict(row) if include_match and row["spotify_id"] else None,
-             row["updated_at"] if row["spotify_id"] else None) for row in rows]
+    return [(artist,
+             json.loads(row["enriched"]) if row and row["enriched"] else None,
+             musicbrainz._row_dict(row) if include_match and row else None,
+             row["updated_at"] if row else None) for artist, row in records]
 
 
-def build_graph(user_id, include_match=False):
-    records = graph_records(user_id, include_match)
+def build_graph(user_id, include_match=False, source="followed", playlist_id=None):
+    records = graph_records(user_id, include_match, source, playlist_id)
     if records is None:
         return None, None
     graph = nx.Graph()
@@ -92,26 +95,81 @@ def build_graph(user_id, include_match=False):
     return graph, revision
 
 
+def resolve_genre_groups(graph):
+    """Classify genres locally, then use shared artists only for unknowns."""
+    groups = {}
+    for node, data in graph.nodes(data=True):
+        if data["group"] != "genre":
+            continue
+        family, subfamily = genre_colors.classify_details(data["label"])
+        groups[node] = {"family": family, "subfamily": subfamily,
+                        "source": "taxonomy" if family else "unclassified"}
+    for node, group in groups.items():
+        if group["family"] is not None:
+            continue
+        votes = {}
+        for artist in graph.neighbors(node):
+            for other in graph.neighbors(artist):
+                if other == node or other not in groups:
+                    continue
+                other_group = groups[other]
+                if other_group["source"] != "taxonomy":
+                    continue
+                key = other_group["family"], other_group["subfamily"]
+                votes[key] = votes.get(key, 0) + 1
+        if votes:
+            highest = max(votes.values())
+            winners = [key for key, count in votes.items() if count == highest]
+            if len(winners) == 1:
+                group["family"], group["subfamily"] = winners[0]
+                group["source"] = "cooccurrence"
+
+    clusters = {}
+    for node, group in groups.items():
+        if group["family"] is None:
+            cluster = "Non classé"
+        else:
+            key = group["family"], group["subfamily"]
+            clusters.setdefault(key, {"genres": 0, "artists": 0})
+            clusters[key]["genres"] += 1
+            clusters[key]["artists"] += graph.degree(node)
+            cluster = None
+        group["cluster"] = cluster
+    for group in groups.values():
+        if group["family"] is None:
+            continue
+        key = group["family"], group["subfamily"]
+        stats = clusters[key]
+        group["cluster"] = f"{key[0]} / {key[1]}" if stats["genres"] >= 3 or stats["artists"] >= 6 else key[0]
+    return groups
+
+
 @graph_bp.get("/get_graph_options")
 def get_graph_options():
     return jsonify([
-        {"id": "artist_genre", "name": "Artistes suivis et genres"},
+        {"id": "artist_genre", "name": "Artistes et genres"},
         {"id": "release_years", "name": "Titres par année de sortie"},
     ])
 
 
 @graph_bp.get("/get_artist_genre_graph_data")
 def get_artist_genre_graph_data():
-    graph, revision = build_graph(session["spotify_user_id"])
+    source, playlist_id = artist_sources.selection()
+    graph, revision = build_graph(session["spotify_user_id"], source=source, playlist_id=playlist_id)
     if graph is None:
         return jsonify(error="Chargez d'abord les artistes suivis."), 404
+    groups = resolve_genre_groups(graph)
     nodes = []
     for node, data in graph.nodes(data=True):
         if data["group"] == "genre":
-            family, color = genre_colors.color_for(data["label"])
+            group = groups[node]
+            family = group["family"]
+            color = genre_colors.color_for_family(data["label"], family)
             nodes.append({"id": node, "label": data["label"], "group": "genre",
                           "color": color, "border_color": genre_colors.border_for(color),
-                          "family": family, "artist_count": graph.degree(node)})
+                          "family": family, "subfamily": group["subfamily"],
+                          "cluster": group["cluster"], "classification_source": group["source"],
+                          "artist_count": graph.degree(node)})
         else:
             nodes.append({"id": node, "label": data["label"], "group": "artist",
                           "color": "#171717", "border_color": "#050505"})
@@ -123,35 +181,39 @@ def get_artist_genre_graph_data():
 @graph_bp.get("/liked_artist_counts")
 def liked_artist_counts():
     user_id = session["spotify_user_id"]
+    source, playlist_id = artist_sources.selection()
     try:
-        counts = liked_tracks.artist_counts(user_id, refresh=request.args.get("refresh") == "1")
+        refresh = request.args.get("refresh") == "1"
+        if source == "liked" and not refresh:
+            liked_tracks.collection(user_id)
+        counts = liked_tracks.artist_counts(user_id, refresh=refresh)
     except SpotifyException as error:
         if error.http_status == 403:
             return jsonify(error="Accès aux titres likés refusé. Reconnectez-vous et autorisez l'accès à votre bibliothèque Spotify."), 403
         raise
-    followed_ids = {artist["id"] for artist in storage.get_followed_artists(user_id)}
-    return jsonify(counts={artist_id: counts.get(artist_id, 0) for artist_id in followed_ids})
+    artists = artist_sources.collection(user_id, source, playlist_id) or []
+    return jsonify(counts={artist["id"]: counts.get(artist["id"], 0) for artist in artists})
 
 
 @graph_bp.get("/artist/<spotify_id>/details")
 def artist_details(spotify_id):
     user_id = session["spotify_user_id"]
+    source, playlist_id = artist_sources.selection()
+    artists = artist_sources.collection(user_id, source, playlist_id) or []
+    if spotify_id not in {artist["id"] for artist in artists}:
+        return jsonify(error="Artiste introuvable dans la source sélectionnée."), 404
     with storage.connect() as db:
-        row = db.execute(
-            "SELECT m.* FROM followed_artists AS f "
-            "LEFT JOIN mb_matches AS m ON m.user_id=f.user_id AND m.kind='artist' AND m.spotify_id=f.artist_id "
-            "WHERE f.user_id=? AND f.artist_id=?", (user_id, spotify_id),
-        ).fetchone()
-    if row is None:
-        return jsonify(error="Artiste suivi introuvable."), 404
-    return jsonify(match=musicbrainz._row_dict(row) if row["spotify_id"] else None)
+        row = db.execute("SELECT * FROM mb_matches WHERE user_id=? AND kind='artist' AND spotify_id=?",
+                         (user_id, spotify_id)).fetchone()
+    return jsonify(match=musicbrainz._row_dict(row) if row else None)
 
 
 @graph_bp.get("/export_graph/<format>")
 def export_graph(format):
     if format != "graphml":
         return jsonify(error="Format non pris en charge."), 400
-    graph, _revision = build_graph(session["spotify_user_id"], include_match=True)
+    source, playlist_id = artist_sources.selection()
+    graph, _revision = build_graph(session["spotify_user_id"], include_match=True, source=source, playlist_id=playlist_id)
     if graph is None:
         return jsonify(error="Chargez d'abord les artistes suivis."), 404
     content = "\n".join(nx.generate_graphml(graph)).encode("utf-8")

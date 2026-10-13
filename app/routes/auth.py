@@ -37,6 +37,8 @@ def callback():
         spotify_auth.get_oauth().get_access_token(code, check_cache=False)
         profile = spotify_auth.get_spotify().current_user()
         session['spotify_user_id'] = profile['id']
+        from app import storage
+        storage.set_cache(profile['id'], 'profile', profile)
         session['csrf_token'] = secrets.token_urlsafe(32)
         return redirect(url_for('router.home'))
     except Exception:

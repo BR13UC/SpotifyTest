@@ -1,0 +1,13 @@
+<div class="visualization-source">
+  <label for="artist-source" data-en="Source">Source</label>
+  <select id="artist-source">
+    <option value="followed" data-en="Followed artists">Artistes suivis</option>
+    <option value="liked" data-en="Liked tracks">Titres likés</option>
+    <option value="playlist" data-en="Playlist">Playlist</option>
+  </select>
+  <div id="artist-source-playlist-controls" hidden>
+    <label for="artist-source-playlist" data-en="Playlist">Playlist</label>
+    <select id="artist-source-playlist" disabled></select>
+  </div>
+  <p id="artist-source-status" class="status-line" role="status" aria-live="polite"></p>
+</div>

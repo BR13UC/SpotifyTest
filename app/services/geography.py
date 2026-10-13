@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app import storage
-from app.services import musicbrainz
+from app.services import artist_sources, musicbrainz
 
 
 COUNTRIES_PATH = Path(__file__).resolve().parents[1] / "static" / "world-countries.geojson"
@@ -29,6 +29,7 @@ def countries():
             if code and code != "-99" and len(code) == 2:
                 result.setdefault(code.upper(), {
                     "code": code.upper(), "name": props.get("ADMIN") or props.get("NAME") or code,
+                    "continent": props.get("CONTINENT"),
                     "latitude": props["LABEL_Y"], "longitude": props["LABEL_X"],
                 })
     return result
@@ -160,15 +161,17 @@ def process_area_one():
     return True
 
 
-def map_data(user_id):
+def map_data(user_id, source="followed", playlist_id=None):
+    artists = artist_sources.collection(user_id, source, playlist_id) or []
     with storage.connect() as db:
         rows = db.execute(
+            "WITH selected AS (SELECT json_extract(value,'$.id') AS artist_id,value AS payload FROM json_each(?)) "
             "SELECT f.artist_id,f.payload,m.status,m.enriched,m.updated_at AS match_updated_at,"
             "g.status AS geo_status,g.latitude,g.longitude,"
-            "g.country_code AS geo_country,g.area_type FROM followed_artists AS f "
-            "LEFT JOIN mb_matches AS m ON m.user_id=f.user_id AND m.kind='artist' AND m.spotify_id=f.artist_id "
+            "g.country_code AS geo_country,g.area_type FROM selected AS f "
+            "LEFT JOIN mb_matches AS m ON m.user_id=? AND m.kind='artist' AND m.spotify_id=f.artist_id "
             "LEFT JOIN geo_areas AS g ON g.area_id=json_extract(m.enriched,'$.origin.external_id') "
-            "WHERE f.user_id=? ORDER BY f.artist_id", (user_id,),
+            "ORDER BY f.artist_id", (json.dumps(artists), user_id),
         ).fetchall()
     markers = {}
     unknown = 0
@@ -212,7 +215,8 @@ def map_data(user_id):
             continue
         marker = markers.setdefault(key, {"id": key, "label": label, "latitude": lat, "longitude": lon,
                                           "precision": precision, "country_code": country["code"] if country else code,
-                                          "country": country["name"] if country else None, "artists": []})
+                                          "country": country["name"] if country else None,
+                                          "continent": country["continent"] if country else None, "artists": []})
         artist = json.loads(row["payload"])
         marker["artists"].append({"id": row["artist_id"], "name": artist.get("name") or "Artiste inconnu",
                                   "origin_type": origin.get("type"), "origin_name": origin.get("name"),
